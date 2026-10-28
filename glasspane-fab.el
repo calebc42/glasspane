@@ -8,10 +8,11 @@
 ;; Glasspane's FAB is the Material extended FAB (`material3.fab') with a
 ;; small toggle stacked above it that fans out the screen's Org actions.
 ;;
-;; The labelled primary is state-aware: "Capture" normally, "Clock in" on a
-;; heading page, and "Clock out · TASK" on every screen while a clock runs,
-;; so the most time-sensitive action is always one tap away.  It folds to
-;; its icon while the body is scrolled.
+;; The labelled primary is "Capture".  On list and outline screens it
+;; becomes "Clock out · TASK" while a clock runs; a heading page keeps
+;; Capture and leads its menu with Clock in or Clock out instead (the
+;; owner's call, 2026-10-28).  It folds to its icon while the body is
+;; scrolled.
 ;;
 ;; The menu is the screen's:
 ;;
@@ -86,16 +87,12 @@ else \"inbox.org\" there."
   "Whether Org has a running clock."
   (and (fboundp 'org-clocking-p) (org-clocking-p)))
 
-(defun glasspane-fab--clock-out-primary (&optional short)
-  "The primary while a clock runs: (ICON LABEL ACTION COLOR DESCRIPTION).
-The label names the task, or with SHORT just \"Clock out\": a heading
-page shows the clock in its own band, and keeps the FAB narrow enough to
-sit beside the page's bottom rows.  The description always names it."
+(defun glasspane-fab--clock-out-primary ()
+  "The list primary while a clock runs: (ICON LABEL ACTION COLOR DESCRIPTION).
+The label names the task, cut short; the description names it whole."
   (let ((task (org-no-properties (or org-clock-current-task ""))))
     (list "timer_off"
-          (if short
-              "Clock out"
-            (concat "Clock out · " (glasspane-fab--truncate task 22)))
+          (concat "Clock out · " (glasspane-fab--truncate task 22))
           (jetpacs-action "org.clock.out")
           "tertiary"
           (if (string-empty-p task) "Clock out" (concat "Clock out of " task)))))
@@ -189,9 +186,10 @@ Each item is (LABEL ICON ACTION)."
 
 (defun glasspane-fab-heading (token &optional info)
   "The FAB for a heading page whose heading TOKEN names; INFO is its meta.
-A running clock makes the primary Clock out; otherwise Clock in.  The menu
-keeps the frequent actions; Structure… and More… open grouped sheets, so
-the fan stays within Material's handful of items."
+The primary is Capture, the app's main button (the owner's call); the
+menu leads with Clock in, or Clock out while a clock runs, then keeps the
+frequent actions; Structure… and More… open grouped sheets, so the fan
+stays within Material's handful of items."
   (when (stringp token)
     (let* ((args (list :token token))
            (act (lambda (verb &rest more)
@@ -199,11 +197,14 @@ the fan stays within Material's handful of items."
            (clocking (glasspane-fab--clocking-p))
            (effort (plist-get info :effort)))
       (glasspane-fab-node
-       (if clocking
-           (glasspane-fab--clock-out-primary t)
-         (list "timer" "Clock in" (funcall act "heading.clock-in")))
+       (glasspane-fab--capture-primary)
        (delq nil
              (list
+              (if clocking
+                  (glasspane-fab-item "Clock out" "timer_off"
+                                      (jetpacs-action "org.clock.out"))
+                (glasspane-fab-item "Clock in" "timer"
+                                    (funcall act "heading.clock-in")))
               (glasspane-fab-item "Add sub-task" "add_task"
                                   (funcall act "glasspane.fab.add" :relation "child" :todo t))
               (if (glasspane-fab-countdown-active-p)

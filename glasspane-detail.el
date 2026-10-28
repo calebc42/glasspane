@@ -1410,8 +1410,8 @@ names the heading without a second mint sweeping the first.")
 
 (defconst glasspane-detail-pane-fab-clearance 168
   "Dp kept free at the end of a pane's bottom rows for the screen's FAB.
-The heading FAB is \"Clock in\" or \"Clock out\" (about 140dp wide
-with its margin on the Pixel Tablet), so the rows stay inline beside it.")
+The heading FAB is the extended \"Capture\" (about 140dp wide with its
+margin on the Pixel Tablet), so the rows stay inline beside it.")
 
 (defun glasspane-detail-pane (ref &optional id)
   "The heading page for REF as a pane beside screen ID's list.

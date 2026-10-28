@@ -203,15 +203,16 @@ search** opens the editor, and saved Views open as peers beneath.
 
 The floating action button is Material's extended FAB, folding to its icon
 while you scroll, with a small toggle above it that fans out the screen's
-Org actions. Its labelled action follows state: **Capture** normally,
-**Clock in** on a heading page, and **Clock out · task** on every screen
-while a clock runs.
+Org actions. Its labelled action is **Capture**; on Agenda, Projects,
+Areas and the outline it becomes **Clock out · task** while a clock runs.
+A heading page keeps Capture and leads its menu with **Clock in** or
+**Clock out**, beside the live clock in its properties band.
 
 - Agenda, Projects and an Area page: **New task** (filed in the inbox,
   scheduled for the day the Agenda shows, tagged with the Projects Area
   filter or the Area), a task under the clocked heading, and each Org
   capture template as its own item.
-- A heading page or pane: add a sub-task, sub-heading or sibling; move up
+- A heading page or pane: clock in or out; add a sub-task, sub-heading or sibling; move up
   or down, promote, demote; a countdown from the heading's Effort (a
   phone reminder at its end); set Effort; cancel the clock; clone with a
   time shift; run the subtree's code blocks (confirmed); sort the

@@ -58,33 +58,39 @@
     (cl-letf (((symbol-function 'org-clocking-p) (lambda () t)))
       (glasspane-fab-test--advertised t
         (dolist (fab (list (glasspane-fab-list)
-                           (glasspane-fab-heading "tok")
                            (glasspane-fab-outline "/v/a.org")))
           (should (string-prefix-p "Clock out" (plist-get fab :label)))
           (should (equal (plist-get fab :content_description)
                          "Clock out of Write the report for the quarterly review"))
           (should (equal (plist-get (plist-get fab :on_tap) :action) "org.clock.out"))
           (should (equal (plist-get fab :color) "tertiary")))
-        ;; Lists name the task; the heading page keeps the FAB narrow so it
-        ;; sits beside the pane's bottom rows (its band shows the clock).
         (should (string-prefix-p "Clock out · Write the report"
                                  (plist-get (glasspane-fab-list) :label)))
-        (should (equal (plist-get (glasspane-fab-heading "tok") :label) "Clock out"))
+        ;; The heading page keeps Capture as its main button; Clock out
+        ;; leads its menu instead.
+        (let ((heading (glasspane-fab-heading "tok")))
+          (should (equal (plist-get heading :label) "Capture"))
+          (should (equal (car (glasspane-fab-test--labels heading)) "Clock out"))
+          (should (equal (plist-get (glasspane-fab-test--action heading "Clock out")
+                                    :action)
+                         "org.clock.out")))
         (should (member "Under clocked task"
                         (glasspane-fab-test--labels (glasspane-fab-list))))
         (should (member "Cancel clock"
                         (glasspane-fab-test--labels (glasspane-fab-heading "tok"))))))))
 
 (ert-deftest glasspane-fab-test-heading-fab ()
-  "A heading page offers Clock in and its structure, time and extras."
+  "A heading page keeps Capture main; its menu leads with Clock in."
   (cl-letf (((symbol-function 'org-clocking-p) (lambda () nil)))
     (glasspane-fab-test--advertised t
       (let* ((fab (glasspane-fab-heading "tok" '(:effort "0:45")))
              (labels (glasspane-fab-test--labels fab)))
-        (should (equal (plist-get fab :label) "Clock in"))
-        (should (equal (plist-get (plist-get fab :on_tap) :args) '(:token "tok")))
-        (should (equal labels '("Add sub-task" "Countdown 0:45" "Set effort…"
+        (should (equal (plist-get fab :label) "Capture"))
+        (should (equal (plist-get (plist-get fab :on_tap) :action) "org.capture.show"))
+        (should (equal labels '("Clock in" "Add sub-task" "Countdown 0:45" "Set effort…"
                                 "Structure…" "More…")))
+        (should (equal (plist-get (glasspane-fab-test--action fab "Clock in") :args)
+                       '(:token "tok")))
         (should (<= (length labels) 7))
         (should (equal (plist-get (glasspane-fab-test--action fab "More…") :args)
                        '(:token "tok" :group "more")))

@@ -299,10 +299,10 @@ with their labels.  A deadline's delay is a warning period."
   (cond
    ((equal part "repeater")
     '(:title "Repeat"
-      :description "After the task is marked done, the repeater shifts its time."
-      :types (("+" . "Add period")
-              ("++" . "Catch up to the future")
-              (".+" . "From the day it's done"))))
+      :description "After the task is marked done, the repeater shifts its time: add the period, catch up past the present, or count from the day it was done."
+      :types (("+" . "Add")
+              ("++" . "Catch up")
+              (".+" . "After done"))))
    ((equal which "DEADLINE")
     '(:title "Warning period"
       :description "How long before the deadline the agenda warns about it."
@@ -310,8 +310,8 @@ with their labels.  A deadline's delay is a warning period."
    (t
     '(:title "Delay"
       :description "How long after the scheduled day the task appears in the agenda."
-      :types (("-" . "Every occurrence")
-              ("--" . "First occurrence only"))))))
+      :types (("-" . "Every time")
+              ("--" . "First only"))))))
 
 (defun glasspane-timestamp--cookie-parts (part cookie)
   "COOKIE of PART split as (TYPE N UNIT), with the dialog's defaults."

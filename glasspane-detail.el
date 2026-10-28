@@ -350,7 +350,9 @@ without duplicating Areas."
                   (jetpacs-action
                    "jetpacs.org.archive" :args (list :token archive-token)
                    :confirm "Archive this subtree?")))))
-     :variant (and (glasspane-ui-pane-selected-p it) "elevated"))
+     ;; Filled reads lighter than an outline on the surface; the heading
+     ;; shown in the pane beside the list lifts to elevated.
+     :variant (if (glasspane-ui-pane-selected-p it) "elevated" "filled"))
      :key (glasspane-ui-item-key it group))))
 
 (defun glasspane-detail-result-card (it)
@@ -380,7 +382,8 @@ agenda card places them; ordinary tags keep the full bottom row."
      (jetpacs-card (list (apply #'jetpacs-column children))
                    :on-tap (and token (jetpacs-action
                                        "heading.tap"
-                                       :args (list :token token))))
+                                       :args (list :token token)))
+                   :variant "filled")
      :key (glasspane-ui-item-key it))))
 
 ;;;; Detail extraction

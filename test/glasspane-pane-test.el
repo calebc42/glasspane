@@ -125,10 +125,11 @@
                                    (token . "t")))
                                 :variant)
                      "elevated"))
-      (should-not (plist-get (glasspane-detail-agenda-card
-                              '((headline . "y") (file . "/v/a.org") (pos . 9)
-                                (token . "t")))
-                             :variant))))
+      (should (equal (plist-get (glasspane-detail-agenda-card
+                                 '((headline . "y") (file . "/v/a.org") (pos . 9)
+                                   (token . "t")))
+                                :variant)
+                     "filled"))))
   (glasspane-pane-test--with "expanded" '("glasspane-projects") t
     (glasspane-ui-pane-select "glasspane-projects" '(:file "/v/a.org" :pos 7))
     (let (repushed)

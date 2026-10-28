@@ -608,6 +608,45 @@ Never fontify or export from a builder; Jetpacs copies only the faces."
                          (list (jetpacs-span "" :mono t)))
                      :style "mono"))
 
+(defconst glasspane-org-reader-callouts
+  '(("note" "info" "primary")
+    ("tip" "lightbulb" "success")
+    ("important" "priority_high" "tertiary")
+    ("warning" "warning" "warning")
+    ("caution" "report" "error"))
+  "Special-block names drawn as callouts: (NAME ICON COLOR-ROLE).
+The GitHub and Obsidian alert set; any other special block keeps its
+folding card.")
+
+(defun glasspane-org-reader-callout (name parameters body)
+  "A tinted callout for special block NAME, or nil when NAME is not one.
+PARAMETERS, when present, titles it; otherwise the capitalized NAME does.
+BODY is the rendered content node.  A rail in the callout's color runs
+down the start edge over a tinted container, and the icon leads the
+title in the same color."
+  (when-let* ((spec (assoc (downcase (or name ""))
+                           glasspane-org-reader-callouts)))
+    (pcase-let ((`(,_ ,icon ,role) spec))
+      (jetpacs-with-attrs
+       (jetpacs-box
+        (jetpacs-with-attrs
+         (jetpacs-box
+          (jetpacs-with-attrs
+           (jetpacs-column
+            (jetpacs-row
+             (jetpacs-icon icon :size 18 :color role)
+             (jetpacs-text (if (and (stringp parameters)
+                                    (not (string-blank-p parameters)))
+                               (string-trim parameters)
+                             (capitalize (downcase name)))
+                           :style "label" :color role)
+             :align "center" :spacing 8)
+            body
+            :fill t :spacing 6)
+           :pad '(:start 12 :end 12 :vertical 10)))
+         :bg "surface_container" :pad '(:start 3) :fill_fraction 1))
+       :bg role :corner 8 :fill_fraction 1))))
+
 (defun glasspane-org-reader--prose-block-at (start limit)
   "Return (END . NODE) for an Org presentation block at START before LIMIT.
 Quotes have a left rule; verse/center preserve centered lines.  Examples,
@@ -662,12 +701,19 @@ content, and keep unsupported or oversized blocks as source text."
                                        (jetpacs-with-attrs
                                         (jetpacs-column (jetpacs-org-inline-prose text nil nil beg) :fill t)
                                         :pad '(:start 12 :end 8 :vertical 6)))
-                                      :bg "surface" :pad '(:start 3)))
+                                      :bg "surface_container_low" :pad '(:start 3)))
                                     :bg "secondary"))
                                   ((or 'verse-block 'center-block)
                                    (glasspane-org-reader--centered-block text (eq type 'verse-block) beg))
                                   ((or 'comment-block 'comment)
                                    (jetpacs-text text :style "caption" :color "outline"))
+                                  ((and 'special-block
+                                        (guard (assoc (downcase (or (org-element-property :type element) ""))
+                                                      glasspane-org-reader-callouts)))
+                                   (glasspane-org-reader-callout
+                                    (org-element-property :type element)
+                                    (org-element-property :parameters element)
+                                    (jetpacs-org-inline-prose text nil nil beg)))
                                   ((or 'export-block 'special-block)
                                    (jetpacs-card
                                     (jetpacs-collapsible

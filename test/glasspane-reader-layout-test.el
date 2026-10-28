@@ -1413,6 +1413,41 @@ swipe, not in the overflow menu."
       (should (equal-including-properties before (buffer-string)))
       (should (= tick (buffer-chars-modified-tick))))))
 
+(ert-deftest glasspane-reader-layout-callouts ()
+  "Note/tip/important/warning/caution blocks are callouts; others fold."
+  (dolist (case '(("NOTE" "info" "primary" "Note")
+                  ("tip" "lightbulb" "success" "Tip")
+                  ("important" "priority_high" "tertiary" "Important")
+                  ("WARNING" "warning" "warning" "Warning")
+                  ("caution" "report" "error" "Caution")))
+    (pcase-let* ((`(,name ,icon ,role ,title) case)
+                 (json (jetpacs-node->canonical-json
+                        (glasspane-org-reader-callout name nil (jetpacs-text "body")))))
+      (should (string-search (format "\"name\":\"%s\"" icon) json))
+      (should (string-search (format "\"bg\":\"%s\"" role) json))
+      (should (string-search (format "\"text\":\"%s\"" title) json))
+      (should (string-search "\"bg\":\"surface_container\"" json))))
+  (should (string-search "Mind the gap"
+                         (jetpacs-node->canonical-json
+                          (glasspane-org-reader-callout "warning" "  Mind the gap "
+                                                        (jetpacs-text "b")))))
+  (should-not (glasspane-org-reader-callout "details" nil (jetpacs-text "b")))
+  ;; Through the reader: a warning block becomes a callout (no card, no
+  ;; fold), a details block keeps its folding card.
+  (with-temp-buffer
+    (insert "Before.\n#+begin_warning\nHot surface.\n#+end_warning\n\n"
+            "#+begin_details\nMore.\n#+end_details\n")
+    (org-mode)
+    (let* ((nodes (glasspane-reader-layout--source-render))
+           (json (jetpacs-node->canonical-json (apply #'jetpacs-column nodes)))
+           (folds (glasspane-reader-layout--nodes-of-type nodes "collapsible")))
+      (should (string-search "\"name\":\"warning\"" json))
+      (should (string-search "Hot surface." json))
+      (should-not (string-search "#+begin_warning" json))
+      (should (equal (mapcar (lambda (fold) (plist-get (plist-get fold :header) :text))
+                             folds)
+                     '("details"))))))
+
 (ert-deftest glasspane-reader-layout-levels-and-rails ()
   "Titles take their level's type; nested headings sit behind a rail."
   (should (equal (glasspane-org-reader-level-style 1) '("title" 600 "on_surface")))

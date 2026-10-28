@@ -137,7 +137,11 @@ with fixed-width `:` prefixes hidden and content spacing preserved.
 Block and line comments use smaller muted text. Export blocks use outlined
 code cards with a folding format header and prepared Emacs face colors. Export
 content stays literal; HTML is never executed or loaded as a webpage. The block delimiters are hidden in these presentations.
-Arbitrary special blocks such as `#+begin_callout` and `#+begin_details`
+Special blocks named note, tip, important, warning or caution (any case)
+render as callouts, the GitHub and Obsidian alert set: a colored rail over a
+tinted container, an icon and a title (the block's parameters, else its
+name), and the body always open. Quote blocks keep their rail over a tinted
+background. Other arbitrary special blocks such as `#+begin_callout` and `#+begin_details`
 use outlined cards with the block name as a folding title. Body emphasis is
 rendered, parameters remain visible as muted text, and outer delimiters are hidden.
 Blank lines, indentation, and emphasis inside quote/verse/center content are

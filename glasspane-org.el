@@ -56,7 +56,10 @@ the stale row back out of the index.  No-op without vulpea."
                      (buffer-file-name buffer-or-path))
                     ((stringp buffer-or-path) buffer-or-path)
                     (t (buffer-file-name (current-buffer))))))
-      (ignore-errors (vulpea-db-update-file f)))))
+      ;; Belt to `glasspane-vulpea-guard-parses' for a Vulpea loaded
+      ;; before Glasspane registered: no persisted element cache.
+      (let ((org-element-cache-persistent nil))
+        (ignore-errors (vulpea-db-update-file f))))))
 
 (defun glasspane-org-save-and-invalidate (&optional buffer)
   "Delegate BUFFER's synchronous save to Jetpacs' native Org policy.

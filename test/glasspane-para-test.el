@@ -2790,5 +2790,33 @@ A declaration for a name outside the group never invents an Area."
           (should (equal (plist-get (plist-get body :on_tap) :action)
                          "resources.browse")))))))
 
+(ert-deftest glasspane-vulpea-parses-run-without-persistent-element-cache ()
+  "Vulpea's scratch parse never reaches Org's persistent element cache.
+With it on, the parse buffer's cache reset loaded the stored cache into
+the buffer visiting the same file, and the next agenda scan looped."
+  (let ((org-element-cache-persistent t)
+        seen)
+    (glasspane-vulpea--parse-unpersisted
+     (lambda (path) (setq seen (list path org-element-cache-persistent)))
+     "/tmp/a.org")
+    (should (equal seen '("/tmp/a.org" nil)))
+    (should (eq org-element-cache-persistent t)))
+  (unwind-protect
+      (progn
+        (glasspane-vulpea-guard-parses)
+        (glasspane-vulpea-guard-parses)
+        (should (advice-member-p #'glasspane-vulpea--parse-unpersisted
+                                 'vulpea-db--parse-file)))
+    (glasspane-vulpea-unguard-parses))
+  (should-not (advice-member-p #'glasspane-vulpea--parse-unpersisted
+                               'vulpea-db--parse-file))
+  ;; The direct refresh binds it too, for a Vulpea Glasspane never set up.
+  (let ((org-element-cache-persistent t)
+        seen)
+    (cl-letf (((symbol-function 'vulpea-db-update-file)
+               (lambda (file) (setq seen (list file org-element-cache-persistent)))))
+      (glasspane-org-vulpea-refresh-file "/tmp/b.org"))
+    (should (equal seen '("/tmp/b.org" nil)))))
+
 (provide 'glasspane-para-test)
 ;;; glasspane-para-test.el ends here

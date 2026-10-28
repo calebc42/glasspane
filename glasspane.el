@@ -167,6 +167,9 @@ explicitly; see RENDERER.org."
   ;; every downstream sibling verb registers through here, never at
   ;; module load.
   (glasspane-org-install-hooks)
+  ;; Vulpea may load later than Glasspane; its parses must never reach
+  ;; Org's persistent element cache (glasspane-vulpea.el).
+  (glasspane-vulpea-guard-parses)
   (glasspane-config-register)
   (glasspane-packages-register)
   (glasspane-ui-register)
@@ -200,6 +203,7 @@ deliberately survive."
   (glasspane-org-reader-unregister)
   (glasspane-timestamp-unregister)
   (glasspane-fab-unregister)
+  (glasspane-vulpea-unguard-parses)
   (glasspane-views-unregister)
   (glasspane-notes-unregister)
   (glasspane-srs-unregister))

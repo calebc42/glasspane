@@ -598,7 +598,8 @@ count, and two numbers on one icon is mud."
       (jetpacs-empty-state :icon "school" :title "All caught up"
                            :caption "Nothing due right now."))
      (t
-      (jetpacs-card
+      (jetpacs-with-attrs
+       (jetpacs-card
        (list
         (jetpacs-row
          (jetpacs-icon "school" :size 28 :color "primary")
@@ -613,7 +614,7 @@ count, and two numbers on one icon is mud."
          (jetpacs-button "Start"
                          (jetpacs-action "srs.review.start")
                          :variant "filled" :icon "play_arrow")
-         :align "center" :spacing 12 :fill t))
+         :align "center" :spacing 12 :fill t)))
        :padding 16)))))
 
 (defun glasspane-srs--install-body ()

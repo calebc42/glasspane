@@ -2721,6 +2721,23 @@ A declaration for a name outside the group never invents an Area."
           (should-not (glasspane-para-test--area "bad" index))
           (should-not (glasspane-para-test--area "phantom" index)))))))
 
+(ert-deftest glasspane-para-review-idle-card-serializes ()
+  "The due-count card builds and serializes; a nil count still offers Start."
+  (cl-letf (((symbol-function 'glasspane-srs-available-p) (lambda () t))
+            ((symbol-function 'glasspane-srs--due-count) (lambda () 3)))
+    (let ((json (jetpacs-node->canonical-json (glasspane-srs--idle-body))))
+      (should (string-search "3 cards due" json))
+      (should (string-search "srs.review.start" json))
+      (should (string-search "\"padding\":16" json))))
+  (cl-letf (((symbol-function 'glasspane-srs-available-p) (lambda () t))
+            ((symbol-function 'glasspane-srs--due-count) (lambda () 1)))
+    (should (string-search "1 card due"
+                           (jetpacs-node->canonical-json
+                            (glasspane-srs--idle-body)))))
+  (cl-letf (((symbol-function 'glasspane-srs-available-p) (lambda () t))
+            ((symbol-function 'glasspane-srs--due-count) (lambda () 0)))
+    (should (equal (plist-get (glasspane-srs--idle-body) :t) "empty_state"))))
+
 (ert-deftest glasspane-para-resources-screen-lists-vault-files-by-title ()
   "Resources titles, sorts, tags and filters the agenda-scope files in-app."
   (glasspane-para-test--with-vault

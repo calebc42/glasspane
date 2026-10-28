@@ -1413,11 +1413,34 @@ swipe, not in the overflow menu."
       (should (equal-including-properties before (buffer-string)))
       (should (= tick (buffer-chars-modified-tick))))))
 
+(ert-deftest glasspane-reader-layout-block-closing-a-body-renders ()
+  "A block that is the last line before the next heading still renders.
+The body text stops before that newline, one past the block's end."
+  (let* ((dir (make-temp-file "gp-close" t))
+         (file (expand-file-name "a.org" dir))
+         (ebp-org-roots (list dir)))
+    (unwind-protect
+        (progn
+          (write-region "* Top\n#+begin_quote\nQ.\n#+end_quote\n** Child\n" nil file nil 'silent)
+          (cl-letf (((symbol-function 'jetpacs-node-advertised-p) (lambda (&rest _) t)))
+            (let ((json (jetpacs-node->canonical-json
+                         (glasspane-org-reader--reader-body file))))
+              (should-not (string-search "#+begin_quote" json))
+              (should (string-search "\"bg\":\"secondary\"" json)))))
+      (dolist (b (buffer-list))
+        (when (equal (buffer-file-name b) file) (kill-buffer b)))
+      (delete-directory dir t)))
+  (should (= (glasspane-org-reader--clamp-end 11 10) 11))
+  (with-temp-buffer
+    (insert "0123456789\n")
+    (should (= (glasspane-org-reader--clamp-end 12 11) 11))
+    (should (= (glasspane-org-reader--clamp-end 5 11) 5))))
+
 (ert-deftest glasspane-reader-layout-callouts ()
   "Note/tip/important/warning/caution blocks are callouts; others fold."
   (dolist (case '(("NOTE" "info" "primary" "Note")
                   ("tip" "lightbulb" "success" "Tip")
-                  ("important" "priority_high" "tertiary" "Important")
+                  ("important" "priority_high" "secondary" "Important")
                   ("WARNING" "warning" "warning" "Warning")
                   ("caution" "report" "error" "Caution")))
     (pcase-let* ((`(,name ,icon ,role ,title) case)
@@ -1426,7 +1449,7 @@ swipe, not in the overflow menu."
       (should (string-search (format "\"name\":\"%s\"" icon) json))
       (should (string-search (format "\"bg\":\"%s\"" role) json))
       (should (string-search (format "\"text\":\"%s\"" title) json))
-      (should (string-search "\"bg\":\"surface_container\"" json))))
+      (should (string-search "\"bg\":\"surface\"" json))))
   (should (string-search "Mind the gap"
                          (jetpacs-node->canonical-json
                           (glasspane-org-reader-callout "warning" "  Mind the gap "
@@ -1453,7 +1476,7 @@ swipe, not in the overflow menu."
   (should (equal (glasspane-org-reader-level-style 1) '("title" 600 "on_surface")))
   (should (equal (glasspane-org-reader-level-style 2) '("body" 600 "on_surface")))
   (should (equal (glasspane-org-reader-level-style 5)
-                 '("body" 500 "on_surface_variant")))
+                 '("body" 500 "outline")))
   (with-temp-buffer
     (insert "* Top\n** Middle\n*** Deep\n")
     (org-mode)
@@ -1463,8 +1486,8 @@ swipe, not in the overflow menu."
            (json (jetpacs-node->canonical-json
                   (glasspane-org-reader--heading-node (car tree) "/x.org" tokens))))
       (should (string-search "\"style\":\"title\"" json))
-      (should (string-search "\"bg\":\"outline_variant\"" json))
-      (should (string-search "\"color\":\"on_surface_variant\",\"font_weight\":500,\"text\":\"Deep\"" json))))
+      (should (string-search "\"bg\":\"outline\"" json))
+      (should (string-search "\"color\":\"outline\",\"font_weight\":500,\"text\":\"Deep\"" json))))
   (should-not (glasspane-org-reader-rail nil)))
 
 (provide 'glasspane-reader-layout-test)

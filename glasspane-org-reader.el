@@ -320,7 +320,7 @@ NODE retains the entire source when image support or its budget is absent."
                      (goto-char (org-element-property :end element))
                      (skip-chars-backward " \t\n")
                      (min (point-max) (line-beginning-position 2)))))
-          (when (<= end limit)
+          (when (<= (setq end (glasspane-org-reader--clamp-end end limit)) limit)
             (cons end (jetpacs-org-render-image element))))))))
 
 (defvar glasspane-org-reader--source-scope "reader-file"
@@ -367,7 +367,7 @@ Use Jetpacs's Emacs-face renderer and Babel action inside a Glasspane card."
                      (goto-char (org-element-property :end element))
                      (skip-chars-backward " \t\n")
                      (min (point-max) (line-beginning-position 2)))))
-          (when (<= end limit)
+          (when (<= (setq end (glasspane-org-reader--clamp-end end limit)) limit)
             (when-let* ((content (jetpacs-org-render-source-block element)))
               (let* ((pos (org-element-property :post-affiliated element))
                      (name (buffer-name))
@@ -431,7 +431,7 @@ or open another file, so resolution belongs exclusively to the Play action."
                  (org-element-property :call element))
         (let* ((pos (org-element-property :post-affiliated element))
                (end (save-excursion (goto-char pos) (line-beginning-position 2))))
-          (when (<= end limit)
+          (when (<= (setq end (glasspane-org-reader--clamp-end end limit)) limit)
             (let* ((name (buffer-name))
                    (target (org-element-property :call element))
                    (arguments (org-element-property :arguments element))
@@ -608,10 +608,17 @@ Never fontify or export from a builder; Jetpacs copies only the faces."
                          (list (jetpacs-span "" :mono t)))
                      :style "mono"))
 
+(defun glasspane-org-reader--clamp-end (end limit)
+  "END, pulled back to LIMIT when only a block's final newline lies past it.
+A heading's body text stops before the newline that precedes the next
+heading, so a block closing the body ends one character beyond its
+LIMIT; that block is still complete and must render, not fall back."
+  (if (and (= end (1+ limit)) (eq (char-before end) ?\n)) limit end))
+
 (defconst glasspane-org-reader-callouts
   '(("note" "info" "primary")
     ("tip" "lightbulb" "success")
-    ("important" "priority_high" "tertiary")
+    ("important" "priority_high" "secondary")
     ("warning" "warning" "warning")
     ("caution" "report" "error"))
   "Special-block names drawn as callouts: (NAME ICON COLOR-ROLE).
@@ -623,7 +630,8 @@ folding card.")
 PARAMETERS, when present, titles it; otherwise the capitalized NAME does.
 BODY is the rendered content node.  A rail in the callout's color runs
 down the start edge over a tinted container, and the icon leads the
-title in the same color."
+title in the same color.  The container is the surface: the renderer
+resolves only its base roles, so a tint role would draw as on_surface."
   (when-let* ((spec (assoc (downcase (or name ""))
                            glasspane-org-reader-callouts)))
     (pcase-let ((`(,_ ,icon ,role) spec))
@@ -644,7 +652,7 @@ title in the same color."
             body
             :fill t :spacing 6)
            :pad '(:start 12 :end 12 :vertical 10)))
-         :bg "surface_container" :pad '(:start 3) :fill_fraction 1))
+         :bg "surface" :pad '(:start 3) :fill_fraction 1))
        :bg role :corner 8 :fill_fraction 1))))
 
 (defun glasspane-org-reader--prose-block-at (start limit)
@@ -668,7 +676,7 @@ content, and keep unsupported or oversized blocks as source text."
                (body-end (save-excursion
                            (goto-char (org-element-property :end element))
                            (skip-chars-backward " \t\n") (line-beginning-position))))
-          (when (<= end limit)
+          (when (<= (setq end (glasspane-org-reader--clamp-end end limit)) limit)
             (cons
              end
              (when (and (jetpacs-node-advertised-p "box")
@@ -701,7 +709,7 @@ content, and keep unsupported or oversized blocks as source text."
                                        (jetpacs-with-attrs
                                         (jetpacs-column (jetpacs-org-inline-prose text nil nil beg) :fill t)
                                         :pad '(:start 12 :end 8 :vertical 6)))
-                                      :bg "surface_container_low" :pad '(:start 3)))
+                                      :bg "surface" :pad '(:start 3)))
                                     :bg "secondary"))
                                   ((or 'verse-block 'center-block)
                                    (glasspane-org-reader--centered-block text (eq type 'verse-block) beg))
@@ -848,17 +856,18 @@ like a file's top level.")
 (defun glasspane-org-reader-level-style (depth)
   "The (STYLE WEIGHT COLOR) a heading title takes at DEPTH.
 Level one reads as a title; level two as bold body; deeper levels as
-medium-weight body in the muted role, the hierarchy a Markdown editor
-draws with type alone."
+medium-weight body in the muted outline role, the hierarchy a Markdown
+editor draws with type alone.  Only the renderer's base roles are used:
+an unknown role falls back to on_surface."
   (pcase depth
     (1 '("title" 600 "on_surface"))
     (2 '("body" 600 "on_surface"))
-    (_ '("body" 500 "on_surface_variant"))))
+    (_ '("body" 500 "outline"))))
 
 (defun glasspane-org-reader-rail (nodes)
   "NODES (child headings) behind a thin outline rail, as one node.
-The quote block's nested-box rule: the outer box paints the rail color,
-the inner one the surface, inset 1dp from the start."
+The quote block's nested-box rule: the outer box paints the outline
+color, the inner one the surface, inset 1dp from the start."
   (when nodes
     (jetpacs-with-attrs
      (jetpacs-box
@@ -868,7 +877,7 @@ the inner one the surface, inset 1dp from the start."
          (apply #'jetpacs-column (append nodes (list :fill t :spacing 4)))
          :pad '(:start 12)))
        :bg "surface" :pad '(:start 1) :fill_fraction 1))
-     :bg "outline_variant" :pad '(:start 4) :fill_fraction 1)))
+     :bg "outline" :pad '(:start 4) :fill_fraction 1)))
 
 (defun glasspane-org-reader--content-nodes (n file tokens &optional skip-props)
   "Render N's visible drawers, body and children from FILE using TOKENS.

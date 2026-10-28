@@ -633,7 +633,7 @@ Today's count rides the dock badge (`glasspane-agenda-dock-badge'), so
 the screen repeats no number above its pages."
   (jetpacs-chrome-screen
    "Agenda"
-   (glasspane-agenda-body)
+   (glasspane-ui-measure (glasspane-agenda-body))
    :back back
    :on-refresh (glasspane-ui-refresh-action)
    :actions (glasspane-ui-top-actions)))

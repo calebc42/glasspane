@@ -449,6 +449,21 @@ because a duplicate sibling key refuses the whole surface update."
         (should (string-search "Fri 30 Oct" json))
         (should-not (string-search "11 Sep" json))))))
 
+(ert-deftest glasspane-navigation-test-reading-width ()
+  "Wide windows center bodies at the measure; phones keep the full width."
+  (let ((node (jetpacs-text "x")))
+    (cl-letf (((symbol-function 'jetpacs-window-class) (lambda (_) "expanded")))
+      (let ((m (glasspane-ui-measure node)))
+        (should (equal (plist-get m :t) "box"))
+        (should (equal (plist-get m :alignment) "top_center"))
+        (should (= (plist-get (seq-first (plist-get m :children)) :max_width)
+                   glasspane-ui-measure-dp))
+        (should (equal (plist-get (plist-get (glasspane-resources-screen nil) :body)
+                                  :t)
+                       "box"))))
+    (cl-letf (((symbol-function 'jetpacs-window-class) (lambda (_) "compact")))
+      (should (eq (glasspane-ui-measure node) node)))))
+
 (ert-deftest glasspane-navigation-test-day-words ()
   "Agenda day headings read in words relative to today."
   (should (equal (glasspane-ui-day-words "2026-10-28" "2026-10-28")

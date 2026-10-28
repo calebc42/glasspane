@@ -1528,7 +1528,7 @@ generic host error screen."
                  (jetpacs-with-attrs list :weight 1)
                (jetpacs-text "No headings to show." :style "caption"))
              :fill t))
-        (glasspane-org-reader--reader-body path))
+        (glasspane-ui-measure (glasspane-org-reader--reader-body path)))
     (error
      (message "glasspane: reader adapter fell back: %s"
               (jetpacs-error-label err))

@@ -1351,7 +1351,8 @@ never guess)."
              (tokens (glasspane-detail--tokens info)))
         (jetpacs-chrome-screen
          (or (plist-get info :file-title) "Detail")
-         (glasspane-ui--detail-body-with-notes info tokens)
+         (glasspane-ui-measure
+          (glasspane-ui--detail-body-with-notes info tokens))
          :back (glasspane-ui-route-back back)
          :actions (glasspane-detail--top-actions info tokens)
          :bottom-bar (when glasspane-ui--detail-read-mode

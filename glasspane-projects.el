@@ -262,7 +262,7 @@ the grouping control trailing the workflow rail."
 
 (defun glasspane-projects-screen (back)
   "Build the Projects screen with BACK navigation."
-  (jetpacs-chrome-screen "Projects" (glasspane-projects--body)
+  (jetpacs-chrome-screen "Projects" (glasspane-ui-measure (glasspane-projects--body))
                          :back back
                          :on-back (unless back (glasspane-ui-peer-on-back))
                          :on-refresh (glasspane-ui-refresh-action)

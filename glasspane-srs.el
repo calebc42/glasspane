@@ -712,9 +712,10 @@ engine empty state.  The optional Habits row always remains independent."
   "The pushed Review screen for the current session state."
   (jetpacs-chrome-screen
    "Review"
-   (if glasspane-srs--active
-       (glasspane-srs--session-body)
-     (glasspane-srs--review-body))
+   (glasspane-ui-measure
+    (if glasspane-srs--active
+        (glasspane-srs--session-body)
+      (glasspane-srs--review-body)))
    :back back
    :on-back (unless back (glasspane-ui-peer-on-back))
    :on-refresh (unless glasspane-srs--active (glasspane-ui-refresh-action))

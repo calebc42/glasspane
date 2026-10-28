@@ -256,6 +256,28 @@ Before any geometry report the class defaults to compact, so a first paint
 lands in the phone layout and chrome re-pushes on the real class."
   (equal (jetpacs-window-class :width) "compact"))
 
+(defun glasspane-ui-wide-p ()
+  "Non-nil when the window's width class is medium or expanded."
+  (not (glasspane-ui-compact-width-p)))
+
+(defcustom glasspane-ui-measure-dp 760
+  "The widest a reading column grows, in dp, on medium and expanded windows.
+Lists and pages center at this width instead of stretching across a
+tablet, the measure every readable editor keeps."
+  :type 'natnum :group 'jetpacs)
+
+(defun glasspane-ui-measure (node)
+  "NODE centered at `glasspane-ui-measure-dp' on a wide window.
+A compact window gets NODE unchanged: a phone is already narrower."
+  (if (glasspane-ui-compact-width-p)
+      node
+    (jetpacs-with-attrs
+     (jetpacs-box (jetpacs-with-attrs node
+                                      :max_width glasspane-ui-measure-dp
+                                      :fill_fraction 1)
+                  :alignment "top_center")
+     :fill_fraction 1)))
+
 (defun glasspane-ui-item-areas (item)
   "Return ITEM's Area-group memberships, resolved at its source position.
 Any resolution error degrades to no Areas rather than failing a screen."

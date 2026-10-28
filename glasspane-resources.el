@@ -225,7 +225,9 @@ SOURCE has no Areas."
 
 (defun glasspane-resources-archive-screen (back)
   "Build the Archive screen with BACK navigation."
-  (jetpacs-chrome-screen "Archive" (glasspane-resources--archive-body)
+  (jetpacs-chrome-screen "Archive"
+                         (glasspane-ui-measure
+                          (glasspane-resources--archive-body))
                          :back back
                          :on-back (unless back (glasspane-ui-peer-on-back))
                          :on-refresh (glasspane-ui-refresh-action)
@@ -396,7 +398,8 @@ Area's icon."
 
 (defun glasspane-resources-screen (back)
   "Build the Resources screen with BACK navigation."
-  (jetpacs-chrome-screen "Resources" (glasspane-resources--body)
+  (jetpacs-chrome-screen "Resources"
+                         (glasspane-ui-measure (glasspane-resources--body))
                          :back back
                          :on-back (unless back (glasspane-ui-peer-on-back))
                          :on-refresh (glasspane-ui-refresh-action)

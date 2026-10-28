@@ -342,7 +342,7 @@ verbs and arguments are identical on both."
 
 (defun glasspane-search-screen (back)
   "The pushed Search screen."
-  (jetpacs-chrome-screen "Search" (glasspane-search--body)
+  (jetpacs-chrome-screen "Search" (glasspane-ui-measure (glasspane-search--body))
                          :back (glasspane-ui-route-back back)))
 
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)

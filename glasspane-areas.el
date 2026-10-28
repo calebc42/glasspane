@@ -443,7 +443,7 @@ sweeps the prior Areas token generation."
 
 (defun glasspane-areas-screen (back)
   "Build the Areas list screen with BACK navigation."
-  (jetpacs-chrome-screen "Areas" (glasspane-areas--list-body)
+  (jetpacs-chrome-screen "Areas" (glasspane-ui-measure (glasspane-areas--list-body))
                          :back back
                          :on-back (unless back (glasspane-ui-peer-on-back))
                          :on-refresh (glasspane-ui-refresh-action)
@@ -454,7 +454,9 @@ sweeps the prior Areas token generation."
 Back returns to the Areas list: the switch chrome hands over while the
 list is still beneath, else a re-open of the list once a deeper drill
 evicted it from the bounded stack."
-  (jetpacs-chrome-screen category (glasspane-areas--drill-body category)
+  (jetpacs-chrome-screen category
+                         (glasspane-ui-measure
+                          (glasspane-areas--drill-body category))
                          :back (glasspane-ui-parent-back
                                 back glasspane-areas--screen-id
                                 (glasspane-ui-reopen-action "areas.open"))

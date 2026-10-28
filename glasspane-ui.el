@@ -278,6 +278,67 @@ A compact window gets NODE unchanged: a phone is already narrower."
                   :alignment "top_center")
      :fill_fraction 1)))
 
+;;;; Two-pane selection (lists beside the heading page on wide windows)
+
+(defvar glasspane-ui--pane-selection (make-hash-table :test #'equal)
+  "Screen id -> the ebp-org ref its heading pane shows.
+Emacs-side only: refs never reach the wire.  Agenda, Projects and every
+Area drill keep their own selection.")
+
+(defvar glasspane-ui-pane-current nil
+  "While a pane screen builds, (TRUENAME . POS) of its selected heading.
+Cards compare against it to mark the selection.")
+
+(defun glasspane-ui-pane-screen-p (id)
+  "Whether screen ID lays its list beside a heading pane on wide windows."
+  (and (stringp id)
+       (or (member id '("glasspane-agenda" "glasspane-projects"))
+           (string-prefix-p "area-" id))))
+
+(defun glasspane-ui-pane-capable-p ()
+  "Whether this window and Companion can show a list beside its heading."
+  (and (glasspane-ui-wide-p) (jetpacs-node-advertised-p "pane_scaffold")))
+
+(defun glasspane-ui-pane-top (surface)
+  "SURFACE's top screen id when it is a pane screen on a pane-capable window."
+  (let ((top (car (ignore-errors (jetpacs-chrome-stack surface)))))
+    (and (glasspane-ui-pane-capable-p)
+         (glasspane-ui-pane-screen-p top)
+         top)))
+
+(defun glasspane-ui-pane-selection (id)
+  "The ref screen ID's pane shows, or nil."
+  (gethash id glasspane-ui--pane-selection))
+
+(defun glasspane-ui-pane-select (id ref)
+  "Show REF in screen ID's pane; nil REF closes the pane."
+  (if ref
+      (puthash id ref glasspane-ui--pane-selection)
+    (remhash id glasspane-ui--pane-selection)))
+
+(defun glasspane-ui-pane-selected-p (item)
+  "Whether ITEM is the heading the screen being built shows in its pane."
+  (and glasspane-ui-pane-current
+       (equal (alist-get 'pos item) (cdr glasspane-ui-pane-current))
+       (let ((file (alist-get 'file item)))
+         (and (stringp file)
+              (equal (condition-case nil (file-truename file) (error file))
+                     (car glasspane-ui-pane-current))))))
+
+(defun glasspane-ui--on-pane-close (_args params)
+  "Close the heading pane of the screen PARAMS' surface shows."
+  (let* ((surface (glasspane-ui-surface params))
+         (top (car (ignore-errors (jetpacs-chrome-stack surface)))))
+    (if (not (glasspane-ui-pane-screen-p top))
+        'stale
+      (glasspane-ui-pane-select top nil)
+      (jetpacs-chrome-defer-current-view-refresh surface)
+      'accepted)))
+
+(defun glasspane-ui-pane-close-action ()
+  "The descriptor closing the open pane; surface-opening so Back honours it."
+  (glasspane-ui-reopen-action "glasspane.pane.close"))
+
 (defun glasspane-ui-item-areas (item)
   "Return ITEM's Area-group memberships, resolved at its source position.
 Any resolution error degrades to no Areas rather than failing a screen."
@@ -1238,7 +1299,8 @@ for a desktop M-x."
     "agenda.today"
     "agenda.select-date"
     "agenda.set-month"
-    "glasspane.refresh")
+    "glasspane.refresh"
+    "glasspane.pane.close")
   "The verbs this rung owns, for the register/unregister sweep.
 The TODO-sequence/tags verbs left with §3 step 2 (they are the
 foundation's ownerless jetpacs.org.* family now);
@@ -1304,6 +1366,8 @@ registry entries in place, and the keyed hub entry is replaced."
                        :doc "Set the agenda calendar's displayed month")
     (jetpacs-defaction "glasspane.refresh" #'glasspane-ui--on-refresh
                        :doc "Pull-to-refresh: recompute every Org extraction")
+    (jetpacs-defaction "glasspane.pane.close" #'glasspane-ui--on-pane-close
+                       :doc "Close the heading pane beside a list")
     ;; The app's own section — the one Glasspane-opinion row left: the
     ;; Packages auto-install switch (the Babel timeout followed the
     ;; table/Babel verbs into the foundation's Org Editing & Display

@@ -5558,7 +5558,7 @@ point: a new screen cannot ship unreachable.")
     "detail.toggle-read" "detail.section" "files.filter"
     "files.toggle-refile"
     "glasspane.document.open" "glasspane.files.return"
-    "glasspane.packages.install" "glasspane.refresh" "glasspane.ts.part"
+    "glasspane.packages.install" "glasspane.refresh" "glasspane.ts.part" "glasspane.pane.close"
     "heading.add-note" "heading.clock-in" "heading.delete"
     "heading.duplicate" "heading.menu" "heading.priority"
     "heading.prop-add" "heading.prop-set" "heading.props.show"

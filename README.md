@@ -20,6 +20,12 @@ page's **Open in file** is where a heading becomes a document in the Org
 reader. Opening an Area keeps the Areas list beneath it. Every destination
 screen pulls to refresh.
 
+On a tablet or other wide window, Agenda, Projects and an Area's page show
+the heading page beside the list: a tap fills the right pane and marks the
+card, the close button or Back closes it, and Prev/Next or the breadcrumbs
+move it. Lists and pages center at a reading width (760dp) instead of
+stretching across the screen.
+
 Resources lists the vault's Org files by title (`#+TITLE`, else the file
 name) with when each was edited, its folder, and its Areas; the Area rail
 narrows the list, a row opens the document, and **Browse in Files** in the

@@ -455,8 +455,9 @@ Back returns to the Areas list: the switch chrome hands over while the
 list is still beneath, else a re-open of the list once a deeper drill
 evicted it from the bounded stack."
   (jetpacs-chrome-screen category
-                         (glasspane-ui-measure
-                          (glasspane-areas--drill-body category))
+                         (glasspane-detail-with-pane
+                          (jetpacs-wire-id "area" category)
+                          (lambda () (glasspane-areas--drill-body category)))
                          :back (glasspane-ui-parent-back
                                 back glasspane-areas--screen-id
                                 (glasspane-ui-reopen-action "areas.open"))

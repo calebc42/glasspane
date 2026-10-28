@@ -56,6 +56,18 @@ column's scroll position by its children's keys. Every destination
 screen carries =:on-refresh= (=glasspane.refresh=), which drops the Org
 memo table and re-renders.
 
+On a medium or expanded window with a Companion that draws
+=pane_scaffold=, Agenda, Projects and every Area drill lay their list beside
+a heading pane (=glasspane-detail-with-pane=).  =heading.tap= from one of
+those screens selects instead of pushing: the ref is stored per screen
+(=glasspane-ui-pane-select=, Emacs-side only) and only the top screen
+rebuilds.  The pane's close button and the screen's back gesture send
+=glasspane.pane.close=; deleting, refiling or archiving the shown heading
+closes the pane.  Search, saved Views and every compact window keep the
+pushed detail screen.  The pane mints its tokens in distinct sets
+(=glasspane-detail--set-suffix=) so a pushed detail above it cannot sweep
+them.
+
 Resources is a Glasspane screen over the agenda-scope files; only its
 *Browse in Files* action (=resources.browse=) hands the whole vault to
 Files, with the capture FAB and the return to this untouched stack.

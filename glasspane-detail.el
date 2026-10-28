@@ -155,19 +155,35 @@ the v1 single-detail-view behavior.")
   "ARGS' `:token' resolved in the app's scope, or nil (handler: stale)."
   (ebp-org-token-ref (plist-get args :token) :owner "glasspane"))
 
+(defvar glasspane-detail--set-suffix ""
+  "Appended to the detail page's token set names.
+A heading pane renders while a pushed detail screen may also be on the
+stack; distinct sets keep one render's replace sweep from retiring the
+other's tokens.")
+
 (defun glasspane-detail--leave (params)
   "Leave the detail screen after its heading stopped existing here.
-Pops when detail is on top (refile/delete landed from it), else just
-repushes the surface.  Runs OUTSIDE the dispatch extent."
-  (jetpacs-chrome-leave (or (plist-get params :surface)
-                            (jetpacs-shell-surface-for "glasspane"))
-                        glasspane-detail--screen-id))
+A heading pane closes; a pushed detail pops when it is on top
+\(refile/delete landed from it), else the surface repushes.  Runs
+OUTSIDE the dispatch extent."
+  (let* ((surface (or (plist-get params :surface)
+                      (jetpacs-shell-surface-for "glasspane")))
+         (top (glasspane-ui-pane-top surface)))
+    (if (and top (glasspane-ui-pane-selection top))
+        (progn (glasspane-ui-pane-select top nil)
+               (jetpacs-shell-push-caught surface))
+      (jetpacs-chrome-leave surface glasspane-detail--screen-id))))
 
 (defun glasspane-detail--push-screen (surface ref)
-  "Defer-push the detail screen for REF onto SURFACE (D2)."
-  (jetpacs-chrome-push-screen-later
-   surface glasspane-detail--screen-id
-   (lambda (back) (glasspane-detail--screen ref back))))
+  "Present REF on SURFACE: in the heading pane, or as a pushed screen.
+A pane screen on a wide window shows REF beside its list and rebuilds
+only itself; everywhere else the detail screen is pushed (D2)."
+  (if-let* ((top (glasspane-ui-pane-top surface)))
+      (progn (glasspane-ui-pane-select top ref)
+             (jetpacs-chrome-defer-current-view-refresh surface))
+    (jetpacs-chrome-push-screen-later
+     surface glasspane-detail--screen-id
+     (lambda (back) (glasspane-detail--screen ref back)))))
 
 ;;;; The header: state control, status pills, and the resting tag line
 
@@ -414,7 +430,8 @@ without duplicating Areas."
                   :on-trigger
                   (jetpacs-action
                    "jetpacs.org.archive" :args (list :token archive-token)
-                   :confirm "Archive this subtree?"))))))
+                   :confirm "Archive this subtree?")))))
+     :variant (and (glasspane-ui-pane-selected-p it) "elevated"))
      :key (glasspane-ui-item-key it group))))
 
 (defun glasspane-detail-result-card (it)
@@ -556,7 +573,8 @@ a key into the scope it was minted for."
                   (append (list main-ref) anc-refs
                           (and prev (list prev))
                           (and next (list next)))
-                  :set "detail" :owner "glasspane"))
+                  :set (concat "detail" glasspane-detail--set-suffix)
+                  :owner "glasspane"))
          (main (pop tokens))
          (anc-tokens (cl-loop repeat (length anc-refs)
                               collect (pop tokens)))
@@ -565,7 +583,8 @@ a key into the scope it was minted for."
          (archive (condition-case nil
                       (car (ebp-org-ref-tokens
                             (list main-ref)
-                            :set "glasspane-detail"
+                            :set (concat "glasspane-detail"
+                                         glasspane-detail--set-suffix)
                             :owner jetpacs-org-dialogs-owner))
                     (error nil))))
     (list :main main :ancestors anc-tokens
@@ -1111,7 +1130,9 @@ absent or declines (the gap #6 degrade)."
                    ;; subtree render (a reader screen still on the stack)
                    ;; the moment a second caller exists.  The root's
                    ;; Properties and Logbook are this screen's tonal panels.
-                   (glasspane-org-reader-subtree file pos 'all "detail-subtree"))
+                   (glasspane-org-reader-subtree
+                    file pos 'all
+                    (concat "detail-subtree" glasspane-detail--set-suffix)))
                (error nil)))
         (let ((body (with-current-buffer (plist-get info :buf)
                       (org-with-wide-buffer
@@ -1338,6 +1359,75 @@ Everything rarer lives in the top bar's overflow menu."
                       :icon "archive" :variant "text"))))
             (glasspane-ui--detail-toolbar-extras ref)
             (list :scroll t)))))
+
+(defun glasspane-detail-pane (ref)
+  "The heading page for REF as a pane beside a list.
+The pushed screen's top bar, floating toolbar and bottom bar become a
+header row and a closing action row; the body is the same page.  A ref
+that stopped resolving degrades to a placeholder."
+  (let ((glasspane-detail--set-suffix "-pane"))
+    (condition-case nil
+        (let* ((info (glasspane-ui--detail-meta ref))
+               (tokens (glasspane-detail--tokens info))
+               (read glasspane-ui--detail-read-mode))
+          (apply
+           #'jetpacs-column
+           (delq nil
+                 (list
+                  (apply #'jetpacs-row
+                         (append
+                          (list (jetpacs-with-attrs
+                                 (jetpacs-text (or (plist-get info :file-title)
+                                                   "Heading")
+                                               :style "title" :max-lines 1)
+                                 :weight 1))
+                          (glasspane-detail--top-actions info tokens)
+                          (list (jetpacs-icon-button
+                                 "close" (glasspane-ui-pane-close-action)
+                                 :content-description "Close")
+                                :align "center" :spacing 4 :fill t)))
+                  (jetpacs-with-attrs
+                   (glasspane-ui--detail-body-with-notes info tokens)
+                   :weight 1)
+                  (when read (glasspane-detail--floating-toolbar info tokens))
+                  (when read (glasspane-detail--bottom-bar tokens))
+                  :fill t))))
+      ((ebp-org-refused ebp-org-unresolved)
+       (jetpacs-empty-state :icon "search_off"
+                            :title "Heading moved or gone"
+                            :caption "Pick it again from the list.")))))
+
+(defun glasspane-detail-pane-placeholder ()
+  "The pane shown beside a list before a heading is picked."
+  (jetpacs-empty-state :icon "article"
+                       :title "Select a heading"
+                       :caption "Its page opens here, beside the list."))
+
+(defun glasspane-detail-with-pane (id body-fn)
+  "Screen ID's body: BODY-FN's list, beside its heading pane when wide.
+On a compact window, or a Companion without `pane_scaffold', the list
+alone at the reading measure.  The selected heading's position is bound
+while the list builds so its card can show the selection."
+  (if (not (glasspane-ui-pane-capable-p))
+      (glasspane-ui-measure (funcall body-fn))
+    (let* ((ref (glasspane-ui-pane-selection id))
+           (meta (and ref (condition-case nil (glasspane-ui--detail-meta ref)
+                            (error nil))))
+           (detail (cond (meta (glasspane-detail-pane ref))
+                         (t (when ref (glasspane-ui-pane-select id nil))
+                            (glasspane-detail-pane-placeholder))))
+           (glasspane-ui-pane-current
+            (and meta (cons (condition-case nil
+                                (file-truename (plist-get meta :file))
+                              (error (plist-get meta :file)))
+                            (plist-get meta :pos)))))
+      (jetpacs-pane-scaffold (funcall body-fn) detail))))
+
+(defun glasspane-detail-pane-on-back (id fallback)
+  "Screen ID's back gesture: close its open pane first, else FALLBACK."
+  (if (and (glasspane-ui-pane-capable-p) (glasspane-ui-pane-selection id))
+      (glasspane-ui-pane-close-action)
+    fallback))
 
 (defun glasspane-detail--screen (ref back)
   "The pushed detail screen for REF.

@@ -1413,5 +1413,24 @@ swipe, not in the overflow menu."
       (should (equal-including-properties before (buffer-string)))
       (should (= tick (buffer-chars-modified-tick))))))
 
+(ert-deftest glasspane-reader-layout-levels-and-rails ()
+  "Titles take their level's type; nested headings sit behind a rail."
+  (should (equal (glasspane-org-reader-level-style 1) '("title" 600 "on_surface")))
+  (should (equal (glasspane-org-reader-level-style 2) '("body" 600 "on_surface")))
+  (should (equal (glasspane-org-reader-level-style 5)
+                 '("body" 500 "on_surface_variant")))
+  (with-temp-buffer
+    (insert "* Top\n** Middle\n*** Deep\n")
+    (org-mode)
+    (let* ((tree (ebp-org-outline-tree
+                  (ebp-org-outline-collect (point-min) (point-max) t)))
+           (tokens (make-hash-table :test #'eql))
+           (json (jetpacs-node->canonical-json
+                  (glasspane-org-reader--heading-node (car tree) "/x.org" tokens))))
+      (should (string-search "\"style\":\"title\"" json))
+      (should (string-search "\"bg\":\"outline_variant\"" json))
+      (should (string-search "\"color\":\"on_surface_variant\",\"font_weight\":500,\"text\":\"Deep\"" json))))
+  (should-not (glasspane-org-reader-rail nil)))
+
 (provide 'glasspane-reader-layout-test)
 ;;; glasspane-reader-layout-test.el ends here

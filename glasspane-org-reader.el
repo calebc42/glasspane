@@ -794,6 +794,36 @@ no section; the heading's swipe actions directly show or hide contents."
         (push node nodes)))
     (nreverse nodes)))
 
+(defvar glasspane-org-reader--depth 1
+  "How deep the heading being rendered sits below its render's top: 1, 2...
+The outline styles a heading by depth, so a detail page's children read
+like a file's top level.")
+
+(defun glasspane-org-reader-level-style (depth)
+  "The (STYLE WEIGHT COLOR) a heading title takes at DEPTH.
+Level one reads as a title; level two as bold body; deeper levels as
+medium-weight body in the muted role, the hierarchy a Markdown editor
+draws with type alone."
+  (pcase depth
+    (1 '("title" 600 "on_surface"))
+    (2 '("body" 600 "on_surface"))
+    (_ '("body" 500 "on_surface_variant"))))
+
+(defun glasspane-org-reader-rail (nodes)
+  "NODES (child headings) behind a thin outline rail, as one node.
+The quote block's nested-box rule: the outer box paints the rail color,
+the inner one the surface, inset 1dp from the start."
+  (when nodes
+    (jetpacs-with-attrs
+     (jetpacs-box
+      (jetpacs-with-attrs
+       (jetpacs-box
+        (jetpacs-with-attrs
+         (apply #'jetpacs-column (append nodes (list :fill t :spacing 4)))
+         :pad '(:start 12)))
+       :bg "surface" :pad '(:start 1) :fill_fraction 1))
+     :bg "outline_variant" :pad '(:start 4) :fill_fraction 1)))
+
 (defun glasspane-org-reader--content-nodes (n file tokens &optional skip-props)
   "Render N's visible drawers, body and children from FILE using TOKENS.
 SKIP-PROPS omits properties owned by the detail view (`all' omits every
@@ -813,9 +843,11 @@ without extra fold headers."
                               (plist-get n :body-start))))
              (list (glasspane-org-reader--drawer-node properties)))
            (glasspane-org-reader--body-nodes n drawers)
-           (mapcar (lambda (child)
-                     (glasspane-org-reader--heading-node child file tokens))
-                   (plist-get n :children))))))
+           (let ((glasspane-org-reader--depth (1+ glasspane-org-reader--depth)))
+             (list (glasspane-org-reader-rail
+                    (mapcar (lambda (child)
+                              (glasspane-org-reader--heading-node child file tokens))
+                            (plist-get n :children)))))))))
 
 (defconst glasspane-org-reader--duplicate-ttl-s 86400
   "Offline ttl for the queued Duplicate (SPEC 14.1; plan T4, reader:89).
@@ -933,12 +965,17 @@ without duplicating the elevated Area chips."
                              (plist-get n :tags))))
     (if (string-empty-p (or title ""))
         (jetpacs-text (or (plist-get n :line) "") :syntax "org")
-      (let ((headline
-             (jetpacs-rich-text
-              (append (glasspane-org-reader--todo-spans todo)
-                      (or (jetpacs-org-inline-spans title t "bold" "on_surface" title-start)
-                          (list (jetpacs-span title :font-weight "bold"
-                                              :color "on_surface")))))))
+      (pcase-let* ((`(,style ,weight ,color)
+                    (glasspane-org-reader-level-style
+                     glasspane-org-reader--depth))
+                   (headline
+                    (jetpacs-rich-text
+                     (append (glasspane-org-reader--todo-spans todo)
+                             (or (jetpacs-org-inline-spans title t weight color
+                                                           title-start)
+                                 (list (jetpacs-span title :font-weight weight
+                                                     :color color))))
+                     :style style)))
         (apply
          #'jetpacs-column
          (append

@@ -265,7 +265,9 @@ each extraction is memoised, so the pages themselves re-extract nothing."
       (let ((date (alist-get 'date it)))
         (unless (equal date current-date)
           (setq current-date date)
-          (push (jetpacs-section-header (or date "Unknown Date")) elements))
+          (push (jetpacs-section-header (or (glasspane-ui-day-words date)
+                                            "Undated"))
+                elements))
         (push (glasspane-agenda--card it) elements)))
     (if elements
         (apply #'jetpacs-lazy-column (nreverse elements))
@@ -314,7 +316,8 @@ grid, the documented fallback recipe."
           :on-month-change (jetpacs-action "agenda.set-month"))
        (glasspane-agenda-month-fallback items-by-date anchor selected-date))
      (jetpacs-divider)
-     (jetpacs-section-header (format "Events for %s" selected-date))
+     (jetpacs-section-header (or (glasspane-ui-day-words selected-date today)
+                                 selected-date))
      (if selected-items
          (apply #'jetpacs-lazy-column
                 (mapcar #'glasspane-agenda--card selected-items))

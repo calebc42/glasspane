@@ -521,6 +521,18 @@ column's scroll position by its children's keys."
      ((stringp token)
       (jetpacs-opaque-id "gp-item-" (list group token) 16)))))
 
+(defun glasspane-ui-day-words (date &optional today)
+  "ISO DATE as a list heading: \"Today · Tue 28 Oct\", else \"Thu 30 Oct\".
+Yesterday and Tomorrow are named too.  TODAY defaults to the current
+date.  An invalid DATE returns nil."
+  (when (jetpacs-dates-valid-p date)
+    (let* ((today (or today (format-time-string "%Y-%m-%d")))
+           (delta (jetpacs-dates-delta date today))
+           (day (format "%s %s" (jetpacs-dates-weekday date t)
+                        (string-trim-left (jetpacs-dates-format date "%e %b"))))
+           (word (pcase delta (0 "Today") (1 "Tomorrow") (-1 "Yesterday"))))
+      (if word (format "%s · %s" word day) day))))
+
 (defun glasspane-ui-age-words (time &optional now)
   "TIME as a short relative phrase such as \"Edited 3 days ago\", or nil.
 NOW defaults to the current time.  Under a minute reads \"Edited just now\"."

@@ -360,6 +360,18 @@ Without `on_back' the Companion finishes the Activity on a peer."
       (should (equal (seq-take pushed 2)
                      (list "app:glasspane" (jetpacs-wire-id "area" "Home")))))))
 
+(ert-deftest glasspane-navigation-test-day-words ()
+  "Agenda day headings read in words relative to today."
+  (should (equal (glasspane-ui-day-words "2026-10-28" "2026-10-28")
+                 "Today · Wed 28 Oct"))
+  (should (equal (glasspane-ui-day-words "2026-10-29" "2026-10-28")
+                 "Tomorrow · Thu 29 Oct"))
+  (should (equal (glasspane-ui-day-words "2026-10-27" "2026-10-28")
+                 "Yesterday · Tue 27 Oct"))
+  (should (equal (glasspane-ui-day-words "2026-11-02" "2026-10-28")
+                 "Mon 2 Nov"))
+  (should-not (glasspane-ui-day-words "nope" "2026-10-28")))
+
 (ert-deftest glasspane-navigation-test-age-words ()
   "Edit times read in words, never as raw timestamps."
   (let ((now (encode-time 0 0 12 28 10 2026)))

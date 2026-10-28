@@ -933,10 +933,15 @@ saved searches stay app opinions; flat TODO/tag editors remain in Org workflow."
       (should (string-search "demo.setup" json))
       (should (string-search "Regenerate Org demo?" json))
       (should (string-search "glasspane-demo-*" json))
-      (should (string-search "Errands" json))
-      (should (string-search "tags:errand" json))
-      (should (string-search "settings.agenda.edit" json))
-      (should (string-search "settings.agenda.delete" json))
+      ;; Saved searches are managed on Agenda's Saved tab, not here.
+      (should-not (string-search "Errands" json))
+      (should-not (string-search "settings.agenda.edit" json))
+      (let ((saved (jetpacs-node->canonical-json
+                    (glasspane-agenda--saved-page))))
+        (should (string-search "Errands" saved))
+        (should (string-search "tags:errand" saved))
+        (should (string-search "settings.agenda.edit" saved))
+        (should (string-search "settings.agenda.delete" saved)))
       ;; The generic moved editors must NOT resurface here.
       (should-not (string-search "Sequence 1" json))
       (should-not (string-search "settings.todo" json))
@@ -945,7 +950,7 @@ saved searches stay app opinions; flat TODO/tag editors remain in Org workflow."
                  (car (glasspane-test--settings-hub-nodes)))))
       (should (string-search "glasspane.settings.open" json))
       (should (string-search
-               "Area tags and icons, demo content, and saved searches" json)))
+               "Area tags and icons, and demo content" json)))
     (let ((screen (glasspane-ui--settings-screen nil)))
       (should (equal (plist-get screen :t) "scaffold"))
       (should (stringp (jetpacs-node->canonical-json screen))))))
@@ -2652,9 +2657,12 @@ wire encoding."
       (should (string-search "jetpacs.org.archive" json))
       (should (string-search "\"token\":\"tok-arch\"" json))
       (should (string-search "Archive this subtree?" json))
-      ;; The done title takes the color degrade (gap #7), never strike.
-      (should (string-search "on_surface" json))
+      ;; The done title reads muted (gap #7: no strike span); the one
+      ;; caption line carries the state and file, no type label.
+      (should (string-search "\"color\":\"outline\",\"text\":\"Water the garden\"" json))
       (should-not (string-search "strike" json))
+      (should-not (string-search "scheduled" json))
+      (should (string-search "tasks.org" json))
       (should (string-search "search.by-tag" json)))
     ;; No tokens -> a static card: no tap, no long-tap, no swipes.
     (let ((card (glasspane-detail-agenda-card '((headline . "Plain")))))
@@ -3955,13 +3963,13 @@ at all (it is what makes Link-it replayable offline)."
         (progn
           (set-file-times file (time-subtract nil (days-to-time 10)))
           (should (equal (glasspane-notes--age-caption file)
-                         "modified 10 days ago"))
+                         "Edited 10 days ago"))
           (set-file-times file (time-subtract nil (days-to-time 100)))
           (should (equal (glasspane-notes--age-caption file)
-                         "modified 3 months ago"))
+                         "Edited 3 months ago"))
           (set-file-times file (time-subtract nil (days-to-time 800)))
           (should (equal (glasspane-notes--age-caption file)
-                         "modified 2 years ago")))
+                         "Edited 2 years ago")))
       (delete-file file))
     (should-not (glasspane-notes--age-caption
                  (concat file "-never-existed")))))

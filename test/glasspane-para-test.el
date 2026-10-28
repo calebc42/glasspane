@@ -1481,23 +1481,24 @@ rail is the shared Area rail; the Search row compacts to icon buttons."
         (should (equal (mapcar (lambda (chip) (plist-get chip :label))
                               (append (plist-get area-group :children) nil))
                        areas)))
-      ;; Compact: the headline keeps the full width and the Area chips
-      ;; stack beneath it, start-aligned, ahead of the caption.
+      ;; Compact: the headline keeps the full width; beneath the caption
+      ;; one start-aligned row carries the elevated Area chips first and
+      ;; the ordinary tags after them.
       (let* ((groups (glasspane-para-test--nodes-of-type compact-card "flow_row"))
-             (area-group (car groups))
+             (chip-row (car groups))
              (column (car (glasspane-para-test--nodes-of-type compact-card "column")))
              (rows (append (plist-get column :children) nil)))
-        (should (= (length groups) 2))
+        (should (= (length groups) 1))
         (should (equal (plist-get (car rows) :t) "rich_text"))
-        (should (eq (cadr rows) area-group))
-        (should-not (plist-get area-group :weight))
-        (should (equal (plist-get area-group :arrange) "start"))
+        (should (eq (car (last rows)) chip-row))
+        (should-not (plist-get chip-row :weight))
+        (should (equal (plist-get chip-row :arrange) "start"))
         (should (equal (mapcar (lambda (chip) (plist-get chip :label))
-                              (append (plist-get area-group :children) nil))
-                       areas))
+                              (append (plist-get chip-row :children) nil))
+                       (append areas '("urgent"))))
         (should (equal (mapcar (lambda (chip) (plist-get chip :variant))
-                              (append (plist-get area-group :children) nil))
-                       '("elevated" "elevated" "elevated"))))))
+                              (append (plist-get chip-row :children) nil))
+                       '("elevated" "elevated" "elevated" nil))))))
   ;; A global group is effective even when the source file has no local
   ;; declaration; a position-less indexed item falls back to its tag payload.
   (let ((org-tag-alist

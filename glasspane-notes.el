@@ -586,16 +586,10 @@ the file-level (level 0) note names the file best when present."
       (error nil))))
 
 (defun glasspane-notes--age-caption (path)
-  "\"modified N days/months/years ago\" from PATH's filesystem mtime, or nil."
-  (when-let* ((attrs (file-attributes path))
-              (days (floor (- (float-time)
-                              (float-time
-                               (file-attribute-modification-time attrs)))
-                           86400)))
-    (cond
-     ((< days 60) (format "modified %d days ago" days))
-     ((< days 730) (format "modified %d months ago" (floor days 30)))
-     (t (format "modified %d years ago" (floor days 365))))))
+  "\"Edited N days ago\" from PATH's filesystem mtime, or nil.
+The same words the Resources and Archive rows use (`glasspane-ui-age-words')."
+  (when-let* ((attrs (file-attributes path)))
+    (glasspane-ui-age-words (file-attribute-modification-time attrs))))
 
 (defun glasspane-notes--stale-card (note token)
   "A card for stale NOTE: title, file, and how long untouched."
@@ -603,8 +597,10 @@ the file-level (level 0) note names the file best when present."
          (age (glasspane-notes--age-caption path)))
     (jetpacs-chrome-row
      (or (vulpea-note-title note) "Untitled note")
-     :subtitle (concat (file-name-nondirectory (or path ""))
-                       (when age (concat " · " age)))
+     :subtitle (concat (or age "")
+                       (when age " · ")
+                       (file-name-nondirectory (or path "")))
+     :icon "description"
      :on-tap (and token (jetpacs-action "heading.tap"
                                         :args (list :token token))))))
 

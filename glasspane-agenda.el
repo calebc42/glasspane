@@ -230,15 +230,19 @@ identically wherever it appears."
      items)))
 
 (defun glasspane-agenda--area-names (anchor)
-  "Area names represented across every Org-backed page at ANCHOR.
-The union keeps the rail stable while the user swipes between pages;
-each extraction is memoised, so the pages themselves re-extract nothing."
-  (glasspane-ui-area-names
-   (apply #'append
-          (mapcar (lambda (mode)
-                    (unless (equal mode glasspane-agenda--saved-mode)
-                      (glasspane-agenda--items-for mode anchor)))
-                  (glasspane-agenda--modes)))))
+  "Area names represented across the span pages and the current mode.
+The three spans keep the rail stable while the user swipes between them;
+a custom agenda joins only while it is selected, so a push never runs
+every saved search just to size the rail."
+  (let ((modes (delete-dups
+                (list "day" "week" "month"
+                      (glasspane-agenda--current-mode)))))
+    (glasspane-ui-area-names
+     (apply #'append
+            (mapcar (lambda (mode)
+                      (unless (equal mode glasspane-agenda--saved-mode)
+                        (glasspane-agenda--items-for mode anchor)))
+                    modes)))))
 
 (defun glasspane-agenda--area-rail (anchor)
   "The Area filter rail above the pages, anchored at ANCHOR."
@@ -442,14 +446,26 @@ anchor to navigate."
                               "This custom agenda found no items.")))))
 
 (defun glasspane-agenda--saved-custom-row (entry)
-  "Render custom-agenda ENTRY as a jump to its existing Agenda page."
+  "Render custom-agenda ENTRY as a jump to its Agenda page, with its editors.
+The Saved tab is where saved searches are managed: the trailing edit and
+delete buttons dispatch the same verbs the settings dialog answers."
   (let ((name (car entry))
         (query (cdr entry)))
     (jetpacs-chrome-row
      name
      :subtitle (format "%s" query)
      :icon "event_note"
-     :trailing (jetpacs-icon "chevron_right")
+     :trailing (list
+                (jetpacs-icon-button "edit"
+                                     (jetpacs-action "settings.agenda.edit"
+                                                     :args (list :name name))
+                                     :content-description
+                                     (format "Edit search %s" name))
+                (jetpacs-icon-button "delete"
+                                     (jetpacs-action "settings.agenda.delete"
+                                                     :args (list :name name))
+                                     :content-description
+                                     (format "Delete search %s" name)))
      :on-tap (jetpacs-action "agenda.set-mode" :args (list :mode name))
      :key (jetpacs-wire-id "saved-agenda" name))))
 
@@ -462,7 +478,6 @@ anchor to navigate."
      name
      :subtitle (format "%s · %s" rendering query)
      :icon "manage_search"
-     :trailing (jetpacs-icon "chevron_right")
      :on-tap (jetpacs-action "views.open" :args (list :name name))
      :key (jetpacs-wire-id "saved-view" name))))
 
@@ -487,7 +502,10 @@ anchor to navigate."
             (if agendas
                 (mapcar #'glasspane-agenda--saved-custom-row agendas)
               (list (jetpacs-text "No custom agendas" :style "caption")))
-            (list (jetpacs-divider)
+            (list (jetpacs-button "New saved search"
+                                  (jetpacs-action "settings.agenda.edit")
+                                  :icon "add" :variant "outlined")
+                  (jetpacs-divider)
                   (jetpacs-section-header "Saved views"))
             (if views
                 (mapcar #'glasspane-agenda--saved-view-row views)
@@ -513,13 +531,26 @@ is registry navigation, not an Org result list, and therefore mints no set."
                          (jetpacs-spacer :height 4)
                          (glasspane-agenda--mode-view mode items anchor)))))))
 
+(defconst glasspane-agenda--page-reach 1
+  "How many pages either side of the selected one a push builds in full.
+A swipe lands on a built neighbour at once; pages further out ship as a
+placeholder until `agenda.set-mode' (the strip's on_change) re-pushes
+with the new selection in the middle.  Building every page made each
+push proportional to the number of saved searches.")
+
+(defun glasspane-agenda--placeholder-page ()
+  "The page shipped for a tab the user has not swiped near yet."
+  (jetpacs-with-attrs
+   (jetpacs-box (jetpacs-progress) :alignment "center")
+   :min_height 160))
+
 (defun glasspane-agenda--body-tabs (mode anchor)
   "The agenda as native tabs: swipe between spans and custom agendas.
-Switching is device-local — every page ships in the push, which the
-memoised extractions keep cheap — and works offline; on_change keeps
-Emacs's mode state in step so the anchor and nav logic follow on the
-next push.  No :id — a background re-push must not yank the user's
-tab."
+The selected page and its neighbours ship built; farther pages ship a
+placeholder (`glasspane-agenda--page-reach').  Switching is
+device-local and on_change keeps Emacs's mode state in step, so the
+anchor, nav logic and the next page window follow on the re-push.  No
+:id — a background re-push must not yank the user's tab."
   (let* ((modes (glasspane-agenda--modes))
          (initial (or (seq-position modes mode) 0)))
     (jetpacs-tabs
@@ -529,7 +560,11 @@ tab."
                                    ("month" "Month")
                                    ("saved" "Saved") (_ m))))
              modes)
-     (mapcar (lambda (m) (glasspane-agenda--page m anchor)) modes)
+     (cl-loop for m in modes
+              for i from 0
+              collect (if (<= (abs (- i initial)) glasspane-agenda--page-reach)
+                          (glasspane-agenda--page m anchor)
+                        (glasspane-agenda--placeholder-page)))
      :initial initial
      :scrollable (jetpacs-bool (> (length modes) 3))
      :on-change (jetpacs-action "agenda.set-mode"))))
@@ -584,19 +619,15 @@ Agenda destination calls it."
     (and (> n 0) (number-to-string n))))
 
 (defun glasspane-agenda-screen (back)
-  "The pushed Agenda screen."
-  (let ((n (glasspane-agenda--today-count)))
-    (jetpacs-chrome-screen
-     "Agenda"
-     (apply #'jetpacs-column
-            (delq nil
-                  (list (when (> n 0)
-                          (jetpacs-text (format "%d scheduled today" n)
-                                        :style "caption"))
-                        (glasspane-agenda-body))))
-     :back back
-     :on-refresh (glasspane-ui-refresh-action)
-     :actions (glasspane-ui-top-actions))))
+  "The pushed Agenda screen.
+Today's count rides the dock badge (`glasspane-agenda-dock-badge'), so
+the screen repeats no number above its pages."
+  (jetpacs-chrome-screen
+   "Agenda"
+   (glasspane-agenda-body)
+   :back back
+   :on-refresh (glasspane-ui-refresh-action)
+   :actions (glasspane-ui-top-actions)))
 
 ;;;; Handlers (S4 — every one answers accepted/stale/rejected)
 

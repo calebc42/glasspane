@@ -156,6 +156,61 @@ passes \"start\"."
             (when (or arrange areas)
               (list :arrange (or arrange "end")))))))
 
+(defun glasspane-ui-mixed-chips (areas tags)
+  "One wrapping chip row: AREAS elevated with their icons, then plain TAGS.
+Nil when both are empty.  A phone shows a card's Areas and tags on one
+line instead of two."
+  (let ((chips
+         (append
+          (mapcar (lambda (tag)
+                    (jetpacs-material3-assist-chip
+                     tag :icon (glasspane-area-icon tag) :variant "elevated"
+                     :on-tap (jetpacs-action "search.by-tag"
+                                             :args (list :tag tag))))
+                  areas)
+          (mapcar (lambda (tag)
+                    (jetpacs-material3-assist-chip
+                     tag :on-tap (jetpacs-action "search.by-tag"
+                                                 :args (list :tag tag))))
+                  tags))))
+    (when chips
+      (apply #'jetpacs-flow-row
+             (append chips (list :spacing 4 :run-spacing 4
+                                 :arrange "start"))))))
+
+(defun glasspane-ui-card-meta (item today &optional done)
+  "ITEM's one-line caption as a rich text: state, dates in words, file.
+Scheduled and deadline stamps read through `glasspane-ui-human-date' and
+carry its urgency color; DONE mutes them.  TODAY is the only clock.
+Nil when there is nothing to say."
+  (let* ((todo (alist-get 'todo item))
+         (file (alist-get 'file item))
+         (dates
+          (delq nil
+                (mapcar
+                 (lambda (spec)
+                   (when-let* ((stamp (alist-get (car spec) item))
+                               (h (glasspane-ui-human-date
+                                   stamp today :done done :kind (cdr spec))))
+                     (jetpacs-span (plist-get h :label)
+                                   :color (plist-get h :color))))
+                 '((scheduled . scheduled) (deadline . deadline)))))
+         (spans
+          (append
+           (when (and (stringp todo) (not (string-empty-p todo)))
+             (list (jetpacs-span todo :font-weight "bold"
+                                 :color (if done "outline" "primary"))))
+           dates
+           (when (stringp file)
+             (list (jetpacs-span (file-name-nondirectory file)
+                                 :color "outline")))))
+         (joined nil))
+    (dolist (span spans)
+      (when joined (push (jetpacs-span "  ·  " :color "outline") joined))
+      (push span joined))
+    (when joined
+      (jetpacs-rich-text (nreverse joined) :style "caption"))))
+
 (defconst glasspane-ui-chip-rail-padding 12
   "Inset, in dp, drawn inside a chip rail's scroll viewport.
 It matches the 12dp content padding of the card lists the rails sit above,
@@ -634,51 +689,16 @@ minting, filtering and replace sweep are the foundation's
       (jetpacs-text "Add an Area tag above before choosing its icon."
                     :style "caption"))))
 
-(defun glasspane-ui--agenda-card (name query)
-  "One saved-search row with its edit/delete affordances."
-  (jetpacs-chrome-row
-   name
-   :subtitle query
-   :trailing (list
-              (jetpacs-icon-button "edit"
-                                   (jetpacs-action "settings.agenda.edit"
-                                                   :args (list :name name))
-                                   :content-description
-                                   (format "Edit search %s" name))
-              (jetpacs-icon-button "delete"
-                                   (jetpacs-action "settings.agenda.delete"
-                                                   :args (list :name name))
-                                   :content-description
-                                   (format "Delete search %s" name)))
-   :key (jetpacs-wire-id "gs" name)))
-
-(defun glasspane-ui--settings-body ()
-  "The app settings screen body: Area tags/icons, demos, and saved searches.
-The org/calendar schema sections live on the Settings ROOT with the
-foundation that registers them, and the TODO-sequence/tags editors
-behind its \"Org workflow\" satellite (jetpacs-org-settings.el, §3
-steps 1-2) — this screen holds only the app's own managed opinions.
-lazy_column, not column: the scaffold body has no scroll container on
-the client."
-  (apply #'jetpacs-lazy-column
-         (append
-          (list (jetpacs-section-header "Area Tags")
-                (jetpacs-text
-                 "Members of the non-exclusive Org tag group “Area”: each is a PARA Area.  Persisted in org-tag-persistent-alist so a file's own #+TAGS line never hides it."
-                 :style "caption")
-                (glasspane-ui--area-tags-enum)
-                (jetpacs-divider)
-                (jetpacs-section-header "Area Icons")
-                (jetpacs-text
-                 "Choose presentation-only Material icons for each Area. Area membership remains ordinary Org tag data."
-                 :style "caption")
-                (glasspane-ui--area-icons-list)
-                (jetpacs-divider)
-                (jetpacs-section-header "Demo Content")
-                (jetpacs-text
-                 "Generate a resettable sample vault or editor tour. Only Glasspane's namespaced demo files are replaced."
-                 :style "caption")
-                (jetpacs-button
+(defun glasspane-ui--demo-section ()
+  "The collapsed Demo Content section: generators a daily driver rarely needs."
+  (jetpacs-collapsible
+   "glasspane-settings-demo"
+   (jetpacs-text "Demo Content" :style "title")
+   (jetpacs-column
+    (jetpacs-text
+     "Generate a resettable sample vault or editor tour. Only Glasspane's namespaced demo files are replaced."
+     :style "caption")
+    (jetpacs-button
                  "Generate Org Demo Content"
                  (jetpacs-action
                   "demo.setup-org"
@@ -704,16 +724,32 @@ the client."
                    :dismiss-label "Cancel"))
                  :icon "code"
                  :variant "outlined")
-                (jetpacs-divider)
-                (jetpacs-section-header "Saved Searches")
-                (jetpacs-text "Manage your saved search queries."
-                              :style "caption"))
-          (mapcar (lambda (cell)
-                    (glasspane-ui--agenda-card (car cell) (cdr cell)))
-                  glasspane-org-custom-agendas)
-          (list (jetpacs-button "New Saved Search"
-                                (jetpacs-action "settings.agenda.edit")
-                                :variant "outlined")))))
+    :spacing 8)
+   :collapsed t))
+
+(defun glasspane-ui--settings-body ()
+  "The app settings screen body: Area tags and icons, then demo content.
+Saved searches are managed where they are used, on Agenda's Saved tab.
+The org/calendar schema sections live on the Settings ROOT with the
+foundation that registers them, and the TODO-sequence/tags editors
+behind its \"Org workflow\" satellite (jetpacs-org-settings.el, §3
+steps 1-2) — this screen holds only the app's own managed opinions.
+lazy_column, not column: the scaffold body has no scroll container on
+the client."
+  (jetpacs-lazy-column
+   (jetpacs-section-header "Area Tags")
+   (jetpacs-text
+    "Members of the non-exclusive Org tag group “Area”: each is a PARA Area.  Persisted in org-tag-persistent-alist so a file's own #+TAGS line never hides it."
+    :style "caption")
+   (glasspane-ui--area-tags-enum)
+   (jetpacs-divider)
+   (jetpacs-section-header "Area Icons")
+   (jetpacs-text
+    "Choose presentation-only Material icons for each Area. Area membership remains ordinary Org tag data."
+    :style "caption")
+   (glasspane-ui--area-icons-list)
+   (jetpacs-divider)
+   (glasspane-ui--demo-section)))
 
 (defun glasspane-ui--settings-screen (back)
   "The pushed Glasspane settings screen."
@@ -1208,7 +1244,7 @@ registry entries in place, and the keyed hub entry is replaced."
     (jetpacs-settings-register-hub-entry
      "glasspane" :order 40 :icon "menu_book"
      :title "Glasspane"
-     :subtitle "Area tags and icons, demo content, and saved searches"
+     :subtitle "Area tags and icons, and demo content"
      :on-tap (jetpacs-action "glasspane.settings.open"))
     ;; Ledgered, so the app's teardown detaches them.
     (jetpacs-add-hook 'jetpacs-shell-refresh-hook

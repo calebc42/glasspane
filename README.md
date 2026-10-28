@@ -177,12 +177,29 @@ The outline filter accepts text and expressions such as `todo:TODO` and
 
 ## Agenda
 
-Agenda pages render the same card Projects uses, so a heading's Area chips
-appear elevated beside (or, on a phone, beneath) its title in both places. An
-Area rail above the Day / Week / Month tabs narrows every page to one Area or
-restores the full set with **All Areas**; the filter persists across pages and
-date navigation. The rail and the fallback mode chips scroll sideways on one
-line.
+Agenda pages render the same card Projects uses. A card is a title line
+(priority cookie, title muted once done), one caption line in words (state ·
+"Today · 09:00" · "Due Friday" or "3 days overdue" in the urgency color ·
+file), and a chip line; a timed item leads with its time. On a phone the
+Area chips and ordinary tags share one start-aligned chip line beneath the
+caption; medium and expanded windows keep the elevated Area chips beside
+the title and the tags below. Week sections and the month view's selected
+day are headed in words ("Today · Wed 28 Oct", "Tomorrow · …"). An Area
+rail above the Day / Week / Month tabs narrows every page to one Area or
+restores the full set with **All Areas**; the filter persists across pages
+and date navigation. The rail and the fallback mode chips scroll sideways on
+one line. A push builds the selected page and its two neighbours; farther
+tabs show a spinner until the strip's change re-pushes around the new
+selection. Today's count lives on the dock badge only.
+
+The trailing **Saved** tab is where saved searches are managed: each custom
+agenda row jumps to its page and carries edit and delete buttons, **New saved
+search** opens the editor, and saved Views open as peers beneath.
+
+Review opens on a due-count card with a filled **Start** button; the stale
+notes beneath it read "Edited 3 months ago · file.org" like Resources rows.
+Settings → Glasspane holds Area tags and icons, with the demo generators in a
+collapsed **Demo Content** section at the end.
 
 Saved Views cards, Search results, and the Archive screen share the same
 Area presentation: Area chips elevate beside or beneath a headline, ordinary

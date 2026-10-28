@@ -344,8 +344,6 @@ without duplicating Areas."
          ;; Normalized "HH:MM" — the raw property is a time-grid string
          ;; like " 9:15......".
          (time (jetpacs-org-reminders-item-hm (alist-get 'time it)))
-         (type (alist-get 'type it))
-         (file (alist-get 'file it))
          (priority (alist-get 'priority it))
          (area-tags (delete-dups (copy-sequence area-tags)))
          (tags (cl-remove-if (lambda (tag) (member tag area-tags))
@@ -353,18 +351,12 @@ without duplicating Areas."
          (token (alist-get 'token it))
          (archive-token (alist-get 'archive-token it))
          (done (ebp-org-done-keyword-p todo))
-         (icon+color (jetpacs-org-agenda-type-icon type))
-         (caption (string-join
-                   (delq nil (list todo
-                                   (and (stringp type)
-                                        (jetpacs-org-agenda-type-label type))
-                                   (and file (file-name-nondirectory file))))
-                   "  ·  "))
-         (lead (cond ((and (stringp time) (not (string-empty-p time)))
-                      (jetpacs-text time :style "label"))
-                     (icon+color
-                      (jetpacs-icon (car icon+color) :size 18
-                                    :color (cdr icon+color)))))
+         (compact (glasspane-ui-compact-width-p))
+         ;; A timed item leads with its time; everything else the one
+         ;; caption line says in words, so no type icon competes with
+         ;; the title.
+         (lead (and (stringp time) (not (string-empty-p time))
+                    (jetpacs-text time :style "label")))
          (headline-node
           (jetpacs-rich-text
            (delq nil
@@ -372,19 +364,27 @@ without duplicating Areas."
                   (when priority
                     (jetpacs-span (format "[%s] " priority)
                                   :font-weight "bold" :color "warning"))
+                  ;; A done title reads muted (no strike span exists,
+                  ;; FOUNDATION-GAPS #7).
                   (jetpacs-span headline
-                                :color (and done "on_surface"))))))
+                                :color (and done "outline"))))))
+         (meta (glasspane-ui-card-meta
+                it (format-time-string "%Y-%m-%d") done))
          (middle
           (apply #'jetpacs-column
                  (delq nil
                        (append
-                        (glasspane-ui-headline-with-areas headline-node
-                                                          area-tags)
+                        ;; A phone puts Areas and tags on one line beneath
+                        ;; the title; wider windows keep Areas beside it.
+                        (if compact
+                            (list headline-node)
+                          (glasspane-ui-headline-with-areas headline-node
+                                                            area-tags))
                         (list
-                        (unless (string-empty-p caption)
-                          (jetpacs-text caption :style "caption"))
-                        (glasspane-agenda-card-date-row it)
-                        (glasspane-detail--agenda-tag-chips tags)))))))
+                         meta
+                         (if compact
+                             (glasspane-ui-mixed-chips area-tags tags)
+                           (glasspane-detail--agenda-tag-chips tags))))))))
     (jetpacs-with-attrs
      (jetpacs-card
      (list (apply #'jetpacs-row

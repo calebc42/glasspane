@@ -183,7 +183,6 @@ SOURCE has no Areas."
      (glasspane-resources--archive-source-name path)
      :subtitle (or (glasspane-ui-age-words mtime) "Archived")
      :icon "archive"
-     :trailing (jetpacs-icon "chevron_right")
      :on-tap (glasspane-navigation-document-action path)
      :key (jetpacs-opaque-id "archive-" path 16))))
 

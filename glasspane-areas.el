@@ -218,7 +218,6 @@ The list mints no tokens: a row names its Area by tag and nothing else."
                    (concat subtitle " · note")
                  subtitle)
      :icon (glasspane-area-icon name)
-     :trailing (jetpacs-icon "chevron_right")
      :on-tap (jetpacs-action "areas.drill" :args (list :category name))
      :key (jetpacs-wire-id "area-row" name))))
 
@@ -261,7 +260,6 @@ TITLE and SUBTITLE override the basename and abbreviated path."
    (or title (file-name-nondirectory file))
    :subtitle (or subtitle (abbreviate-file-name file))
    :icon "description"
-   :trailing (jetpacs-icon "chevron_right")
    :on-tap (glasspane-navigation-document-action file)
    :key (jetpacs-opaque-id "area-file-" file 16)))
 
@@ -274,7 +272,6 @@ ITEM carries a durable heading token, so the card names identity only and
    :subtitle (concat "Area note · "
                      (file-name-nondirectory (or (alist-get 'file item) "")))
    :icon "article"
-   :trailing (jetpacs-icon "chevron_right")
    :on-tap (and (stringp (alist-get 'token item))
                 (jetpacs-action "heading.tap"
                                 :args (list :token (alist-get 'token item))))

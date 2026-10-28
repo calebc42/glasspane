@@ -360,6 +360,48 @@ Without `on_back' the Companion finishes the Activity on a peer."
       (should (equal (seq-take pushed 2)
                      (list "app:glasspane" (jetpacs-wire-id "area" "Home")))))))
 
+(ert-deftest glasspane-navigation-test-agenda-builds-only-nearby-pages ()
+  "A push builds the selected tab page and its neighbours; the rest wait."
+  (let ((glasspane-org-custom-agendas
+         '(("A" . "tags:a") ("B" . "tags:b") ("C" . "tags:c")))
+        built)
+    (cl-letf (((symbol-function 'glasspane-agenda--page)
+               (lambda (mode _anchor)
+                 (push mode built)
+                 (jetpacs-text mode))))
+      (let* ((tabs (glasspane-agenda--body-tabs "week" "2026-10-28"))
+             (pages (append (plist-get tabs :children) nil)))
+        ;; day week month A B C saved: week is index 1.
+        (should (= (length pages) 7))
+        (should (equal (sort built #'string-lessp) '("day" "month" "week")))
+        (should (equal (mapcar (lambda (page) (plist-get page :t)) pages)
+                       '("text" "text" "text" "box" "box" "box" "box")))
+        (should (equal (plist-get (seq-first (plist-get (nth 3 pages) :children))
+                                  :t)
+                       "progress"))))))
+
+(ert-deftest glasspane-navigation-test-card-meta-line ()
+  "The card caption reads state, dates in words with urgency, and file."
+  (let* ((meta (glasspane-ui-card-meta
+                '((todo . "NEXT") (file . "/v/work.org")
+                  (scheduled . "<2026-10-28 Wed 09:00>")
+                  (deadline . "<2026-10-25 Sat>"))
+                "2026-10-28"))
+         (spans (append (plist-get meta :spans) nil))
+         (texts (mapcar (lambda (sp) (plist-get sp :text)) spans)))
+    (should (equal (plist-get meta :t) "rich_text"))
+    (should (equal texts '("NEXT" "  ·  " "Today · 09:00" "  ·  "
+                           "3 days overdue" "  ·  " "work.org")))
+    (should (equal (plist-get (nth 0 spans) :color) "primary"))
+    (should (equal (plist-get (nth 4 spans) :color) "error"))
+    ;; Done mutes the state and the dates; nothing to say gives nil.
+    (let ((done (glasspane-ui-card-meta
+                 '((todo . "DONE") (deadline . "<2026-10-25 Sat>"))
+                 "2026-10-28" t)))
+      (should (cl-every (lambda (sp) (equal (plist-get sp :color) "outline"))
+                        (append (plist-get done :spans) nil))))
+    (should-not (glasspane-ui-card-meta '((headline . "x")) "2026-10-28"))))
+
 (ert-deftest glasspane-navigation-test-day-words ()
   "Agenda day headings read in words relative to today."
   (should (equal (glasspane-ui-day-words "2026-10-28" "2026-10-28")

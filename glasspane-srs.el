@@ -598,13 +598,23 @@ count, and two numbers on one icon is mud."
       (jetpacs-empty-state :icon "school" :title "All caught up"
                            :caption "Nothing due right now."))
      (t
-      (jetpacs-column
-       (jetpacs-text (format "%d item%s due" due (if (= due 1) "" "s"))
-                     :style "title")
-       (jetpacs-spacer :height 8)
-       (jetpacs-button "Start review"
-                       (jetpacs-action "srs.review.start")
-                       :variant "filled" :icon "play_arrow"))))))
+      (jetpacs-card
+       (list
+        (jetpacs-row
+         (jetpacs-icon "school" :size 28 :color "primary")
+         (jetpacs-with-attrs
+          (jetpacs-column
+           (jetpacs-text (format "%d card%s due" due (if (= due 1) "" "s"))
+                         :style "headline" :font-weight 500)
+           (jetpacs-text "Flashcards from org-srs, oldest first"
+                         :style "caption")
+           :spacing 2)
+          :weight 1)
+         (jetpacs-button "Start"
+                         (jetpacs-action "srs.review.start")
+                         :variant "filled" :icon "play_arrow")
+         :align "center" :spacing 12 :fill t))
+       :padding 16)))))
 
 (defun glasspane-srs--install-body ()
   "The org-srs-absent placeholder.

@@ -19,7 +19,7 @@ ebp_el_dir=${EBP_EL_DIR:-"$repositories_root/ebp.el"}
 ebp_org_dir=${EBP_ORG_DIR:-"$repositories_root/ebp-org"}
 material_dir=${GLASSPANE_MATERIAL3_DIR:-"$jetpacs_dir/emacs/apps/jetpacs-material3"}
 
-for suite in glasspane-reader-layout-test glasspane-navigation-test glasspane-para-test glasspane-test; do
+for suite in glasspane-reader-layout-test glasspane-navigation-test glasspane-timestamp-test glasspane-para-test glasspane-test; do
   emacs -Q --batch \
     -L "$ebp_el_dir/lisp" -L "$ebp_org_dir/lisp" \
     -L "$jetpacs_dir/emacs" \

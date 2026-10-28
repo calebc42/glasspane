@@ -83,6 +83,7 @@
 (require 'jetpacs-org-reminders)      ; the agenda card's type icon/label
 (require 'glasspane-org)
 (require 'glasspane-ui)
+(require 'glasspane-timestamp)          ; the planning dialog detail opens
 (require 'glasspane-navigation)
 (require 'jetpacs-org-settings)      ; the shared tag vocabulary
 
@@ -1591,10 +1592,10 @@ crosses that boundary; the device cannot supply a raw position."
   (glasspane-detail--delegate-heading args params "priority"))
 
 (defun glasspane-detail--on-planning-edit (args params)
-  "Open the foundation timestamp dialog on this heading's `:type' stamp.
-The whole picker flow — date, time, repeater cookies, clear — is the
-base module's (jetpacs-org-dialogs.el:558-745); this verb only seeds it,
-which is the G4 delegation replacing v1's app planning dialog."
+  "Open Glasspane's timestamp dialog on this heading's `:type' stamp.
+Day, time and end time, repeater and delay in one Material dialog
+\(`glasspane-timestamp-open'); this verb only reads the current stamp
+and seeds it."
   (let ((type (plist-get args :type))
         (ref (glasspane-detail--token-ref args)))
     (cond
@@ -1613,9 +1614,7 @@ which is the G4 delegation replacing v1's app planning dialog."
                                    (goto-char marker)
                                    (org-entry-get nil type)))
                               (set-marker marker nil)))))
-               (jetpacs-org-dialogs--ts-open
-                (list :kind 'planning :ref ref :which type)
-                stamp params))
+               (glasspane-timestamp-open ref type stamp params))
            (error (message "glasspane: planning editor failed: %s"
                            (jetpacs-error-label err))))))
       'accepted))))

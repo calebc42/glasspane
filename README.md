@@ -196,6 +196,14 @@ The trailing **Saved** tab is where saved searches are managed: each custom
 agenda row jumps to its page and carries edit and delete buttons, **New saved
 search** opens the editor, and saved Views open as peers beneath.
 
+Scheduling lives in one dialog, lifted from Orgzly Native and dressed in
+Material: the day as a date button over Today / Tomorrow / Next week chips,
+time and end time behind switches, and Repeat and Delay (a Warning period on
+a deadline) rows whose chip says the cookie in words and opens a small period
+picker. Clear, Cancel and Set close it; the stamp is written whole, so a
+repeater, delay and end time survive. The detail page's date pills (long
+press) and planning drawers open it.
+
 Review opens on a due-count card with a filled **Start** button; the stale
 notes beneath it read "Edited 3 months ago · file.org" like Resources rows.
 Settings → Glasspane holds Area tags and icons, with the demo generators in a

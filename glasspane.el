@@ -63,6 +63,9 @@
 ;; point share; detail still degrades when the reader itself is absent.
 (require 'glasspane-org-reader)
 (require 'glasspane-navigation)
+;; The planning timestamp dialog, lifted from Orgzly Native and dressed in
+;; Material; detail's date pills and planning drawers open it.
+(require 'glasspane-timestamp)
 (require 'glasspane-detail)
 ;; G5 plus the PARA screens: the foundation date helper supports both daily
 ;; halves; agenda and Projects build on detail's shared card and the
@@ -167,6 +170,7 @@ explicitly; see RENDERER.org."
   (glasspane-ui-register)
   (glasspane-org-reader-register)
   (glasspane-navigation-register)
+  (glasspane-timestamp-register)
   (glasspane-detail-register)
   (glasspane-agenda-register)
   (glasspane-projects-register)
@@ -191,6 +195,7 @@ deliberately survive."
   (jetpacs-apps-unregister glasspane-owner)
   (glasspane-ui-unregister)
   (glasspane-org-reader-unregister)
+  (glasspane-timestamp-unregister)
   (glasspane-views-unregister)
   (glasspane-notes-unregister)
   (glasspane-srs-unregister))

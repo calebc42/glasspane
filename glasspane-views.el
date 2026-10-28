@@ -188,7 +188,7 @@ feeds both table cells and `jetpacs-rich-text' cards."
   "The shared rich card for ITEM; TRAILING sits at the row's end.
 Priority-badged headline with its Area chips elevated (STACK forces them
 beneath the headline, for a narrow board column), todo · file caption,
-dates in words and #tag text on one caption line.  Swipe from the
+dates in words on one caption line, flat tag chips.  Swipe from the
 start reveals
 the open-todo completion action; swipe from the end reveals scheduling for
 today.  Both remain reachable by tap → detail.  Every wired affordance needs
@@ -204,14 +204,15 @@ carrying a ref on the wire (D-4)."
                          (jetpacs-rich-text
                           (glasspane-views--headline-spans item))
                          areas stack)
-                        ;; The agenda card's one caption line: state,
-                        ;; dates in words, file, ordinary tags as #tags.
+                        ;; The agenda card's caption line, then the flat
+                        ;; chips of the ordinary tags.
                         (list
                          (glasspane-ui-card-meta
                           item (format-time-string "%Y-%m-%d")
-                          (glasspane-views--done-p item)
-                          (cl-remove-if (lambda (tag) (member tag areas))
-                                        (append (alist-get 'tags item) nil)))))))))
+                          (glasspane-views--done-p item))
+                         (glasspane-ui-chip-line
+                          nil (cl-remove-if (lambda (tag) (member tag areas))
+                                            (append (alist-get 'tags item) nil)))))))))
     (jetpacs-card
      (list (apply #'jetpacs-row
                   (delq nil

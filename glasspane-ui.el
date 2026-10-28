@@ -156,12 +156,11 @@ passes \"start\"."
             (when (or arrange areas)
               (list :arrange (or arrange "end")))))))
 
-(defun glasspane-ui-card-meta (item today &optional done tags)
-  "ITEM's one-line caption as a rich text: state, dates in words, file, TAGS.
+(defun glasspane-ui-card-meta (item today &optional done)
+  "ITEM's one-line caption as a rich text: state, dates in words, file.
 Scheduled and deadline stamps read through `glasspane-ui-human-date' and
 carry its urgency color; DONE mutes them.  TODAY is the only clock.
-TAGS, the ordinary (non-Area) tags, trail as #tag text.  Nil when there
-is nothing to say."
+Nil when there is nothing to say."
   (let* ((todo (alist-get 'todo item))
          (file (alist-get 'file item))
          (dates
@@ -203,21 +202,31 @@ is nothing to say."
            (mapcar #'list dates)
            (when (stringp file)
              (list (list (jetpacs-span (file-name-nondirectory file)
-                                       :color "outline"))))
-           (list (glasspane-ui-tag-spans tags)))))
+                                       :color "outline")))))))
     (glasspane-ui-meta-line groups)))
 
-(defun glasspane-ui-tag-spans (tags)
-  "TAGS as tinted `#tag' spans, space-separated; each searches by its tag.
-Inline text the way Bear and Obsidian draw tags, keeping chips for Areas."
-  (let (out)
-    (dolist (tag (append tags nil))
-      (when out (push (jetpacs-span " ") out))
-      (push (jetpacs-span (concat "#" tag) :color "primary"
-                          :on-tap (jetpacs-action "search.by-tag"
-                                                  :args (list :tag tag)))
-            out))
-    (nreverse out)))
+(defun glasspane-ui-chip-line (areas tags &optional arrange)
+  "One wrapping chip row: AREAS elevated with their icons, then TAGS flat.
+Every chip searches by its tag.  ARRANGE defaults to \"start\".  Nil when
+both are empty.  The elevated/flat contrast is what tells an Area from an
+ordinary Org tag."
+  (let ((chips
+         (append
+          (mapcar (lambda (tag)
+                    (jetpacs-material3-assist-chip
+                     tag :icon (glasspane-area-icon tag) :variant "elevated"
+                     :on-tap (jetpacs-action "search.by-tag"
+                                             :args (list :tag tag))))
+                  areas)
+          (mapcar (lambda (tag)
+                    (jetpacs-material3-assist-chip
+                     tag :on-tap (jetpacs-action "search.by-tag"
+                                                 :args (list :tag tag))))
+                  tags))))
+    (when chips
+      (apply #'jetpacs-flow-row
+             (append chips (list :spacing 4 :run-spacing 4
+                                 :arrange (or arrange "start")))))))
 
 (defun glasspane-ui-meta-line (groups &optional style)
   "One caption line of GROUPS, each a list of spans, joined by dots.

@@ -2005,18 +2005,24 @@ rejects, and a swept or mismatched list answers `stale'."
                                       :text))
                          rows)))
     (jetpacs-check-profile band 'app)
-    (should (equal labels '("Scheduled" "Deadline" "Priority" "Areas" "Tags" "Clock")))
-    (dolist (text '("Tomorrow · 09:00 · weekly" "3 days overdue" "#deep"
+    (should (equal labels '("Scheduled" "Deadline" "Priority" "Tags" "Clock")))
+    (dolist (text '("Tomorrow · 09:00 · weekly" "3 days overdue"
                     "\"label\":\"health\"" "\"icon\":\"favorite\""
+                    "\"label\":\"deep\"" "Edit tags"
                     "Properties 1" "Connections 3" "Logbook"))
       (should (string-search (encode-coding-string text 'utf-8) json)))
-    (should-not (string-search "\"#health\"" json))
+    (should-not (string-search "\"#" json))
     (should-not (string-search "alpha" json))
-    ;; Row taps: the dialog, the priority dialog, the tags drawer, clock out.
+    ;; Row taps: the dialog, the priority dialog, clock out; the Tags row's
+    ;; chips search and its edit button opens the Tags drawer.
     (should (equal (mapcar (lambda (row) (plist-get (plist-get row :on_tap) :action))
                            rows)
                    '("detail.planning.edit" "detail.planning.edit"
-                     "detail.priority.edit" nil "detail.section" "org.clock.out")))
+                     "detail.priority.edit" nil "org.clock.out")))
+    (let* ((tags-row (nth 3 rows))
+           (edit (cl-find "icon_button" (glasspane-test--nodes tags-row)
+                          :key (lambda (n) (plist-get n :t)) :test #'equal)))
+      (should (equal (plist-get (plist-get edit :on_tap) :args) '(:section "tags"))))
     (should (equal (plist-get (plist-get (car rows) :on_tap) :args)
                    '(:token "tok" :type "SCHEDULED")))
     ;; Everything set: no add chips; nothing open: no tonal toggle.
@@ -2026,11 +2032,14 @@ rejects, and a swept or mismatched list answers `stale'."
       (should (string-search "\"variant\":\"tonal\""
                              (jetpacs-node->canonical-json
                               (glasspane-detail--properties-band info "tok")))))
-    ;; Nothing set: no rows, every add chip, no Connections without extras.
+    ;; Nothing set: only the Tags row (with its edit button), every add
+    ;; chip, no Connections without extras.
     (let* ((bare (glasspane-detail--properties-band '(:today "2026-09-15") "tok"))
            (bare-json (jetpacs-node->canonical-json bare)))
-      (should (= (length (plist-get bare :children)) 1))
-      (dolist (label '("Schedule" "Deadline" "Priority" "Tag"))
+      (should (= (length (plist-get bare :children)) 2))
+      (should (string-search "No tags" bare-json))
+      (should (string-search "Edit tags" bare-json))
+      (dolist (label '("Schedule" "Deadline" "Priority"))
         (should (string-search (format "\"label\":\"%s\"" label) bare-json)))
       (should-not (string-search "Connections" bare-json)))))
 (ert-deftest glasspane-test-detail-schedule-keeps-time-and-cookies ()
@@ -2374,7 +2383,7 @@ rejects, and a swept or mismatched list answers `stale'."
       (should (equal (funcall value "extra") '("beta")))
       (jetpacs-check-profile panel 'app)
       ;; At rest: the band's Areas row holds the elevated Area chips; its
-      ;; Tags row the local plain tag as #tag text; inherited plain tags
+      ;; Tags row the flat local plain tag; inherited plain tags
       ;; stay hidden.
       (cl-letf (((symbol-function 'glasspane-detail--reader-nodes) #'ignore))
         (let* ((glasspane-ui--detail-read-mode t)
@@ -2391,10 +2400,10 @@ rejects, and a swept or mismatched list answers `stale'."
                (line-chips (append (plist-get line :children) nil))
                (json (jetpacs-node->canonical-json body)))
           (should (equal (mapcar (lambda (c) (plist-get c :label)) line-chips)
-                         '("alpha" "beta")))
+                         '("alpha" "beta" "extra")))
           (should (equal (plist-get (car line-chips) :variant) "elevated"))
-          (should (string-search "\"#extra\"" json))
-          (should-not (string-search "\"#hot\"" json))
+          (should-not (plist-get (car (last line-chips)) :variant))
+          (should-not (string-search "\"#" json))
           (should-not (string-search "\"hot\""
                                      (jetpacs-node->canonical-json line))))))))
 

@@ -75,15 +75,17 @@ leading half shows the keyword and cycles the buffer's sequence on tap, the
 chevron lists every keyword plus **No state**. An open keyword is filled, a
 done one tonal, and a heading with no state shows an outlined ring.
 
-Beneath the headline, a properties band lists only the facts that are set,
-one label/value row each: Scheduled and Deadline in words (“Today · 09:00 ·
+Beneath the headline, a properties band lists the heading's facts, one
+label/value row each: Scheduled and Deadline in words (“Today · 09:00 ·
 weekly”, “Due Friday”, “3 days overdue”, colored by urgency and muted once
 done) with the full sentence beneath, tapping open the timestamp dialog;
-Priority in its rank color, tapping open its dialog; Areas as elevated chips;
-the heading's own tags as #tag text, tapping open the Tags drawer; and a
-running Clock, tapping to clock out. Inherited tags stay out of the resting
-view. One line beneath adds what is unset (Schedule, Deadline, Priority,
-Tag) and toggles the Properties, Logbook and Connections drawers, labelled
+Priority in its rank color, tapping open its dialog; a running Clock,
+tapping to clock out; and an always-present Tags row: Areas as elevated
+chips with their icons, the heading's own tags as flat chips (each searches
+by its tag), and an edit button that opens the Tags drawer, also while the
+heading has no tags. Inherited tags stay out of the resting view. One line
+beneath adds what is unset (Schedule, Deadline, Priority) and toggles the
+Properties, Logbook and Connections drawers, labelled
 with their counts; the open one is tonal and only one is open at a time. A
 drawer is a filled card headed by its name and one edit action. The Tags
 drawer shows each declared tag group as toggle chips (the Area group with

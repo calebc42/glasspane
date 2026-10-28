@@ -314,22 +314,23 @@ without duplicating Areas."
                                              (done "outline"))
                                 :font-weight (and selected 600))))))
          (meta (glasspane-ui-card-meta
-                it (format-time-string "%Y-%m-%d") done tags))
+                it (format-time-string "%Y-%m-%d") done))
          (middle
           (apply #'jetpacs-column
                  (delq nil
                        (append
-                        ;; Ordinary tags ride the caption as #tag text.  A
-                        ;; phone puts the Area chips on a line beneath it;
-                        ;; wider windows keep them beside the title.
+                        ;; A phone puts elevated Areas and flat tags on one
+                        ;; chip line under the caption; wider windows keep
+                        ;; the Areas beside the title and the tags below.
                         (if compact
                             (list headline-node)
                           (glasspane-ui-headline-with-areas headline-node
                                                             area-tags))
                         (list
                          meta
-                         (and compact
-                              (glasspane-ui-tag-chips area-tags t "start"))))))))
+                         (if compact
+                             (glasspane-ui-chip-line area-tags tags)
+                           (glasspane-ui-chip-line nil tags))))))))
     (jetpacs-with-attrs
      (jetpacs-card
      (list (apply #'jetpacs-row
@@ -381,13 +382,12 @@ agenda card places them; ordinary tags keep the full bottom row."
                    (list (and todo (list (jetpacs-span todo :font-weight "bold"
                                                        :color "primary")))
                          (and file (list (jetpacs-span (file-name-nondirectory file)
-                                                       :color "outline")))
-                         (glasspane-ui-tag-spans tags))))
+                                                       :color "outline"))))))
          (children (delq nil
                          (append
                           (glasspane-ui-headline-with-areas
                            (jetpacs-text headline :style "body") areas)
-                          (list caption)))))
+                          (list caption (glasspane-ui-chip-line nil tags))))))
     (jetpacs-with-attrs
      (jetpacs-card (list (apply #'jetpacs-column children))
                    :on-tap (and token (jetpacs-action
@@ -799,8 +799,10 @@ NAME announces the row for assistive technology."
   "INFO's metadata as one calm label/value band, Obsidian-properties style.
 Only facts that are set get a row: Scheduled and Deadline in words with
 their urgency color (tap: the timestamp dialog), Priority (tap: its
-dialog), Areas as elevated chips, Tags as #tag text (tap: the tags
-drawer), a running Clock (tap: clock out).  Beneath, one line of chips
+dialog), and a running Clock (tap: clock out).  The Tags row is always
+there: elevated Area chips, flat tag chips (each searches by its tag)
+and an edit button that opens the Tags drawer, also when there are no
+tags yet.  Beneath, one line of chips
 adds what is unset, and the Properties, Logbook and Connections drawers
 toggle as text buttons with counts.  MAIN is the heading token; EXTRAS
 are the app layers' Connections nodes."
@@ -840,13 +842,19 @@ are the app layers' Connections nodes."
                                   :color (glasspane-detail--priority-color
                                           priority (plist-get info :priority-levels)))
                     (jetpacs-action "detail.priority.edit" :args (list :token main))))
-                 (when areas
-                   (glasspane-detail--band-row
-                    "Areas" (glasspane-ui-tag-chips areas t "start")))
-                 (when tags
-                   (glasspane-detail--band-row
-                    "Tags" (jetpacs-rich-text (glasspane-ui-tag-spans tags))
-                    (jetpacs-action "detail.section" :args '(:section "tags"))))
+                 (glasspane-detail--band-row
+                  "Tags"
+                  (jetpacs-row
+                   (jetpacs-with-attrs
+                    (or (glasspane-ui-chip-line areas tags)
+                        (jetpacs-text "No tags" :style "body" :color "outline"))
+                    :weight 1)
+                   (jetpacs-icon-button
+                    "edit"
+                    (jetpacs-action "detail.section" :args '(:section "tags"))
+                    :variant (and (eq glasspane-detail--section 'tags) "tonal")
+                    :content-description "Edit tags")
+                   :align "center" :spacing 4 :fill t))
                  (when (plist-get info :clocked-in)
                    (glasspane-detail--band-row
                     "Clock" (jetpacs-text "Running" :style "body" :color "success")
@@ -863,10 +871,7 @@ are the app layers' Connections nodes."
                  (unless priority (funcall add-chip "Priority" "priority_high"
                                            (jetpacs-action "detail.priority.edit"
                                                            :args (list :token main))))
-                 (unless (or tags areas)
-                   (funcall add-chip "Tag" "label"
-                            (jetpacs-action "detail.section"
-                                            :args '(:section "tags")))))))
+                 )))
          (toggles
           (cl-loop for (name section icon label) in glasspane-detail--sections
                    when (memq section '(props logbook links))

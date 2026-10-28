@@ -1126,7 +1126,9 @@ document over the detail screen."
            (spans (plist-get headline :spans))
            (areas (aref (plist-get row :children) 1))
            (chip (aref (plist-get areas :children) 0))
-           (tags (car (last (append (plist-get header :children) nil)))))
+           (kids (append (plist-get header :children) nil))
+           (meta (car (last kids 2)))
+           (tags (car (last kids))))
       (should (equal (plist-get (aref spans 0) :text) "NEXT "))
       (should (equal (plist-get (aref spans 0) :color) "#123456"))
       (should (equal (plist-get (aref spans 1) :text) "A long project heading"))
@@ -1134,14 +1136,18 @@ document over the detail screen."
       (should (= (plist-get areas :weight) 1))
       (should (equal (plist-get chip :variant) "elevated"))
       (should (equal (plist-get chip :icon) "work"))
-      ;; One caption line: the priority, then ordinary tags as #tag text.
-      (should (equal (plist-get tags :t) "rich_text"))
+      ;; One caption line with the priority, then the ordinary tags as
+      ;; flat chips that search by tag.
       (should (equal (mapcar (lambda (sp) (plist-get sp :text))
-                             (append (plist-get tags :spans) nil))
-                     '("Priority A" "  ·  " "#plain")))
-      (should (equal (plist-get (plist-get (aref (plist-get tags :spans) 2) :on_tap)
-                                :action)
-                     "search.by-tag"))
+                             (append (plist-get meta :spans) nil))
+                     '("Priority A")))
+      (should (equal (plist-get tags :t) "flow_row"))
+      (let ((chip (aref (plist-get tags :children) 0)))
+        (should (equal (plist-get chip :label) "plain"))
+        (should-not (plist-get chip :variant))
+        (should (equal (plist-get (plist-get chip :on_tap) :action)
+                       "search.by-tag")))
+      (should (= (length (plist-get tags :children)) 1))
       (should (equal (jetpacs-node->canonical-json header)
                      (jetpacs-node->canonical-json
                       (cl-letf (((symbol-function 'jetpacs-window-class) wide))
@@ -1394,12 +1400,10 @@ swipe, not in the overflow menu."
                      (labels (mapcar (lambda (chip) (plist-get chip :label))
                                      chips))
                      (json (jetpacs-node->canonical-json header)))
-                ;; Areas stay chips; ordinary tags read as #tag text.
-                (dolist (tag '("Work" "Home"))
+                ;; Every tag is a chip once: Areas elevated, the rest flat.
+                (dolist (tag '("Work" "Home" "beta" "plain"))
                   (should (= (cl-count tag labels :test #'equal) 1)))
-                (dolist (tag '("beta" "plain"))
-                  (should-not (member tag labels))
-                  (should (string-search (concat "\"#" tag "\"") json)))
+                (should-not (string-search "\"#" json))
                 (should (equal render
                                (glasspane-org-reader--heading-node
                                 node "/unused/reader.org" tokens)))))))

@@ -957,12 +957,12 @@ header swipe is Archive's one home."
    ;; SPEC 16.4: without a name the trigger announces as its icon.
    :name "Heading actions"))
 
-(defun glasspane-org-reader--meta-line (n &optional tags today)
+(defun glasspane-org-reader--meta-line (n &optional today)
   "Tree node N's one caption line, or nil when it has nothing to say.
 Priority, the scheduled and deadline stamps in words with their urgency
-color (`glasspane-ui-human-date'), the clocked total as h:mm, then the
-heading's ordinary TAGS as `#tag' spans.  TODAY defaults to the current
-date; the scheduled stamp is read at N's position in the current buffer."
+color (`glasspane-ui-human-date') and the clocked total as h:mm; tags are
+chips beneath it.  TODAY defaults to the current date; the scheduled
+stamp is read at N's position in the current buffer."
   (let* ((today (or today (format-time-string "%Y-%m-%d")))
          (done (plist-get n :done))
          (priority (plist-get n :priority))
@@ -985,8 +985,7 @@ date; the scheduled stamp is read at N's position in the current buffer."
            (funcall date-span (plist-get n :deadline) 'deadline)
            (when (and (numberp mins) (> mins 0))
              (list (jetpacs-span (format "%d:%02d clocked" (/ mins 60) (% mins 60))
-                                 :color "outline")))
-           (glasspane-ui-tag-spans tags)))))
+                                 :color "outline")))))))
 
 (defun glasspane-org-reader--todo-spans (todo)
   "Render TODO with its source buffer's native Org keyword face.
@@ -1036,8 +1035,10 @@ without duplicating the elevated Area chips."
          (append
           (glasspane-ui-headline-with-areas headline areas)
           (list
-           ;; One caption line: priority, dates in words, clock, #tags.
-           (glasspane-org-reader--meta-line n tags)
+           ;; One caption line: priority, dates in words, clock; then the
+           ;; ordinary tags as flat chips (Areas are elevated above).
+           (glasspane-org-reader--meta-line n)
+           (glasspane-ui-chip-line nil tags)
            :spacing 4)))))))
 
 (defun glasspane-org-reader--drawer-swipe-actions (drawers buffer)

@@ -457,7 +457,7 @@ evicted it from the bounded stack."
   (jetpacs-chrome-screen category (glasspane-areas--drill-body category)
                          :back (glasspane-ui-parent-back
                                 back glasspane-areas--screen-id
-                                (jetpacs-action "areas.open"))
+                                (glasspane-ui-reopen-action "areas.open"))
                          :on-refresh (glasspane-ui-refresh-action)
                          :actions (glasspane-ui-top-actions)))
 

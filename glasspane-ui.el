@@ -186,15 +186,36 @@ Nil when there is nothing to say."
   (let* ((todo (alist-get 'todo item))
          (file (alist-get 'file item))
          (dates
-          (delq nil
-                (mapcar
-                 (lambda (spec)
-                   (when-let* ((stamp (alist-get (car spec) item))
-                               (h (glasspane-ui-human-date
-                                   stamp today :done done :kind (cdr spec))))
-                     (jetpacs-span (plist-get h :label)
-                                   :color (plist-get h :color))))
-                 '((scheduled . scheduled) (deadline . deadline)))))
+          (or
+           (delq nil
+                 (mapcar
+                  (lambda (spec)
+                    (when-let* ((stamp (alist-get (car spec) item))
+                                (h (glasspane-ui-human-date
+                                    stamp today :done done :kind (cdr spec))))
+                      (jetpacs-span (plist-get h :label)
+                                    :color (plist-get h :color))))
+                  '((scheduled . scheduled) (deadline . deadline))))
+           ;; An agenda item carries no stamps, only the agenda's type,
+           ;; stamp date and time: say the same thing from those.
+           (when-let* ((date (alist-get 'date item))
+                       ((jetpacs-dates-valid-p date))
+                       (type (or (alist-get 'type item) "")))
+             (let* ((hm (jetpacs-org-reminders-item-hm (alist-get 'time item)))
+                    (stamp (format "<%s%s>" date
+                                   (if (and (stringp hm) (not (string-empty-p hm)))
+                                       (concat " " hm)
+                                     "")))
+                    (kind (cond ((string-match-p "deadline" type) 'deadline)
+                                ((string-match-p "scheduled" type) 'scheduled)))
+                    (h (and kind (glasspane-ui-human-date
+                                  stamp today :done done :kind kind))))
+               (cond
+                (h (list (jetpacs-span (plist-get h :label)
+                                       :color (plist-get h :color))))
+                ((glasspane-ui-day-words date today)
+                 (list (jetpacs-span (glasspane-ui-day-words date today)
+                                     :color "outline"))))))))
          (spans
           (append
            (when (and (stringp todo) (not (string-empty-p todo)))
@@ -513,12 +534,22 @@ A peer draws no arrow, and a scaffold with neither arrow nor `on_back'
 lets the Companion finish the Activity, so every peer declares this."
   (jetpacs-view-switch glasspane-ui-root-screen))
 
+(defun glasspane-ui-reopen-action (verb)
+  "The Back descriptor that re-presents a screen through VERB on this surface.
+The Companion's back gesture mirrors the arrow only for a view switch or a
+remote action that opens a surface (ChromeBack.kt); a bare remote action
+falls through to the system default and leaves the app.  So a reopen names
+Glasspane's own surface, which also keeps it an explicit presentation."
+  (jetpacs-shell-action-opening-surface
+   verb (jetpacs-shell-surface-for "glasspane")))
+
 (defun glasspane-ui-parent-back (back parent-id reopen)
   "BACK when it switches to PARENT-ID, else the REOPEN action.
 Chrome hands a builder the switch to the screen directly beneath it, and a
 bounded stack evicts the screen above the root once a drill goes a level
 deeper.  A child whose parent was evicted would otherwise land on the root;
-REOPEN re-presents the parent instead, at the cost of one round trip."
+REOPEN (built with `glasspane-ui-reopen-action') re-presents the parent
+instead, at the cost of one round trip."
   (if (and back (equal (plist-get back :view) parent-id)) back reopen))
 
 (defun glasspane-ui-current-route ()
@@ -542,7 +573,7 @@ stack bound and BACK would skip it; reopen it through its own verb."
     (if (and back dest
              (not (equal route "agenda"))
              (equal (plist-get back :view) glasspane-ui-root-screen))
-        (jetpacs-action (plist-get dest :verb))
+        (glasspane-ui-reopen-action (plist-get dest :verb))
       back)))
 
 (defun glasspane-ui-refresh-action ()

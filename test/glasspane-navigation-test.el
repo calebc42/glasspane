@@ -400,7 +400,25 @@ Without `on_back' the Companion finishes the Activity on a peer."
                  "2026-10-28" t)))
       (should (cl-every (lambda (sp) (equal (plist-get sp :color) "outline"))
                         (append (plist-get done :spans) nil))))
-    (should-not (glasspane-ui-card-meta '((headline . "x")) "2026-10-28"))))
+    (should-not (glasspane-ui-card-meta '((headline . "x")) "2026-10-28"))
+    ;; Agenda items carry type, stamp date and time instead of stamps.
+    (let* ((overdue (glasspane-ui-card-meta
+                     '((todo . "TODO") (type . "past-scheduled")
+                       (date . "2026-10-21") (time . " 9:15......")
+                       (file . "/v/a.org"))
+                     "2026-10-28"))
+           (texts (mapcar (lambda (sp) (plist-get sp :text))
+                          (append (plist-get overdue :spans) nil))))
+      (should (member "7 days ago · 09:15" texts)))
+    (let ((due (glasspane-ui-card-meta
+                '((type . "deadline") (date . "2026-10-30"))
+                "2026-10-28")))
+      (should (string-search "Due Friday"
+                             (jetpacs-node->canonical-json due))))
+    (let ((plain (glasspane-ui-card-meta
+                  '((type . "timestamp") (date . "2026-10-29"))
+                  "2026-10-28")))
+      (should (string-search "Tomorrow" (jetpacs-node->canonical-json plain))))))
 
 (ert-deftest glasspane-navigation-test-repeats-keep-distinct-sibling-keys ()
   "A repeating task listed on several days never repeats a sibling key.

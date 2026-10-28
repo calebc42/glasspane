@@ -2119,6 +2119,8 @@ re-entry truncates."
                    "Home" (jetpacs-view-switch "glasspane-areas"))))
         (should (equal (plist-get (glasspane-para-test--back drill) :action)
                        "areas.open"))
+        (should (equal (plist-get (glasspane-para-test--back drill) :open_surface)
+                       "app:glasspane"))
         (should (equal (plist-get (glasspane-para-test--back kept) :view)
                        "glasspane-areas")))
       (should (eq (glasspane-search--on-open nil (list :surface surface))

@@ -292,6 +292,14 @@ without duplicating Areas."
          ;; the title.
          (lead (and (stringp time) (not (string-empty-p time))
                     (jetpacs-text time :style "label")))
+         ;; The heading shown in the pane beside the list.  Marked by an
+         ;; accent bar and title, not only by the card variant: a design
+         ;; profile may style every variant alike.
+         (selected (glasspane-ui-pane-selected-p it))
+         (marker (and selected
+                      (jetpacs-with-attrs (jetpacs-box)
+                                          :width 4 :height 40 :bg "primary"
+                                          :corner 2)))
          (headline-node
           (jetpacs-rich-text
            (delq nil
@@ -302,7 +310,9 @@ without duplicating Areas."
                   ;; A done title reads muted (no strike span exists,
                   ;; FOUNDATION-GAPS #7).
                   (jetpacs-span headline
-                                :color (and done "outline"))))))
+                                :color (cond (selected "primary")
+                                             (done "outline"))
+                                :font-weight (and selected 600))))))
          (meta (glasspane-ui-card-meta
                 it (format-time-string "%Y-%m-%d") done tags))
          (middle
@@ -323,10 +333,12 @@ without duplicating Areas."
     (jetpacs-with-attrs
      (jetpacs-card
      (list (apply #'jetpacs-row
-                  (delq nil
-                        (list lead
-                              (jetpacs-with-attrs (jetpacs-box middle)
-                                                  :weight 1)))))
+                  (append
+                   (delq nil
+                         (list marker lead
+                               (jetpacs-with-attrs (jetpacs-box middle)
+                                                   :weight 1)))
+                   (list :spacing 12 :align "center"))))
      ;; Tap opens the heading's own page on this surface, as a note row
      ;; does in Orgzly; the document route is the page's "Open in file".
      :on-tap (and token (jetpacs-action "heading.tap"
@@ -351,7 +363,7 @@ without duplicating Areas."
                    :confirm "Archive this subtree?")))))
      ;; Filled reads lighter than an outline on the surface; the heading
      ;; shown in the pane beside the list lifts to elevated.
-     :variant (if (glasspane-ui-pane-selected-p it) "elevated" "filled"))
+     :variant (if selected "elevated" "filled"))
      :key (glasspane-ui-item-key it group))))
 
 (defun glasspane-detail-result-card (it)

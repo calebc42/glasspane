@@ -120,11 +120,14 @@
   (let ((glasspane-ui-pane-current (cons "/v/a.org" 7)))
     (cl-letf (((symbol-function 'file-truename) #'identity)
               ((symbol-function 'glasspane-ui-item-areas) (lambda (_) nil)))
-      (should (equal (plist-get (glasspane-detail-agenda-card
-                                 '((headline . "x") (file . "/v/a.org") (pos . 7)
-                                   (token . "t")))
-                                :variant)
-                     "elevated"))
+      (let* ((card (glasspane-detail-agenda-card
+                    '((headline . "x") (file . "/v/a.org") (pos . 7)
+                      (token . "t"))))
+             (json (jetpacs-node->canonical-json card)))
+        (should (equal (plist-get card :variant) "elevated"))
+        ;; Marked independently of the variant: accent bar and title.
+        (should (string-search "\"bg\":\"primary\"" json))
+        (should (string-search "\"color\":\"primary\",\"font_weight\":600,\"text\":\"x\"" json)))
       (should (equal (plist-get (glasspane-detail-agenda-card
                                  '((headline . "y") (file . "/v/a.org") (pos . 9)
                                    (token . "t")))

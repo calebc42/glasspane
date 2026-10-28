@@ -250,11 +250,17 @@ each chip at its intrinsic width."
                    (list :scroll t :spacing 4
                          :content-padding glasspane-ui-chip-rail-padding)))))
 
+(defvar glasspane-ui-narrow-container nil
+  "Non-nil while building content for a narrow container on a wide window.
+The list beside a heading pane is phone-width, so it lays out as one.")
+
 (defun glasspane-ui-compact-width-p ()
-  "Non-nil when the window's width class is compact (a phone, SPEC 20.1.1).
+  "Non-nil when content lays out for a compact width (a phone, SPEC 20.1.1).
+True too inside a narrow container (`glasspane-ui-narrow-container').
 Before any geometry report the class defaults to compact, so a first paint
 lands in the phone layout and chrome re-pushes on the real class."
-  (equal (jetpacs-window-class :width) "compact"))
+  (or glasspane-ui-narrow-container
+      (equal (jetpacs-window-class :width) "compact")))
 
 (defun glasspane-ui-wide-p ()
   "Non-nil when the window's width class is medium or expanded."

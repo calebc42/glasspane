@@ -1389,8 +1389,14 @@ that stopped resolving degrades to a placeholder."
                   (jetpacs-with-attrs
                    (glasspane-ui--detail-body-with-notes info tokens)
                    :weight 1)
-                  (when read (glasspane-detail--floating-toolbar info tokens))
-                  (when read (glasspane-detail--bottom-bar tokens))
+                  ;; The app FAB floats over the pane's bottom end.
+                  (when read
+                    (jetpacs-with-attrs
+                     (glasspane-detail--floating-toolbar info tokens)
+                     :pad '(:end 120)))
+                  (when read
+                    (jetpacs-with-attrs (glasspane-detail--bottom-bar tokens)
+                                        :pad '(:end 120)))
                   :fill t))))
       ((ebp-org-refused ebp-org-unresolved)
        (jetpacs-empty-state :icon "search_off"
@@ -1421,7 +1427,9 @@ while the list builds so its card can show the selection."
                                 (file-truename (plist-get meta :file))
                               (error (plist-get meta :file)))
                             (plist-get meta :pos)))))
-      (jetpacs-pane-scaffold (funcall body-fn) detail))))
+      (jetpacs-pane-scaffold (let ((glasspane-ui-narrow-container t))
+                               (funcall body-fn))
+                             detail))))
 
 (defun glasspane-detail-pane-on-back (id fallback)
   "Screen ID's back gesture: close its open pane first, else FALLBACK."

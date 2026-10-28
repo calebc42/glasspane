@@ -97,6 +97,17 @@
                                 (plist-get (glasspane-agenda-screen nil) :body))))
         (should-not (glasspane-ui-pane-selection "glasspane-agenda"))))))
 
+(ert-deftest glasspane-pane-test-list-beside-pane-lays-out-narrow ()
+  "The list beside the pane builds in the compact layout."
+  (glasspane-pane-test--with "expanded" '("glasspane-agenda") t
+    (let (seen)
+      (cl-letf (((symbol-function 'glasspane-agenda-body)
+                 (lambda () (setq seen (glasspane-ui-compact-width-p))
+                   (jetpacs-text "list"))))
+        (glasspane-agenda-screen nil)
+        (should seen)
+        (should-not (glasspane-ui-compact-width-p))))))
+
 (ert-deftest glasspane-pane-test-compact-screen-is-the-list-alone ()
   "A phone gets the list, no pane scaffold."
   (glasspane-pane-test--with "compact" '("glasspane-agenda") t

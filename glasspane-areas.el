@@ -400,10 +400,11 @@ sweeps the prior Areas token generation."
              (decl-count (length decl-items))
              (decl-tokenized (seq-take tokenized decl-count))
              (project-items (seq-drop tokenized decl-count))
-             (cards (mapcar (lambda (item)
-                              (glasspane-detail-agenda-card
-                               item (append (alist-get 'areas item) nil)))
-                            project-items))
+             (cards (glasspane-ui-dedupe-keys
+                     (mapcar (lambda (item)
+                               (glasspane-detail-agenda-card
+                                item (append (alist-get 'areas item) nil)))
+                             project-items)))
              (files (glasspane-areas--files-in-all selected))
              (file-rows (mapcar #'glasspane-areas--file-row files))
              (archive-rows (mapcar #'glasspane-resources-archive-row

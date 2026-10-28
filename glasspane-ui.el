@@ -557,11 +557,14 @@ stack bound and BACK would skip it; reopen it through its own verb."
 
 (defun glasspane-ui-item-key (item &optional group)
   "A stable list key for heading ITEM, or nil when it has no identity.
-Built from the file, position, agenda type and date, so a heading the
-agenda lists twice (scheduled and due the same day) and a Project under
-two Areas (GROUP names the bucket) keep distinct keys while the key
-survives a re-mint of the item's token.  The Companion restores a lazy
-column's scroll position by its children's keys."
+Built from the file, position, agenda type, agenda day and stamp date,
+so a heading the agenda lists twice (scheduled and due the same day), a
+repeating task on several days, and a Project under two Areas (GROUP
+names the bucket) keep distinct keys while the key survives a re-mint of
+the item's token.  The Companion restores a lazy column's scroll
+position by its children's keys.  Lists still pass their cards through
+`glasspane-ui-dedupe-keys': a duplicate sibling key refuses the whole
+surface update, and no extraction quirk may cost the app its root."
   (let ((file (alist-get 'file item))
         (pos (alist-get 'pos item))
         (token (alist-get 'token item)))
@@ -571,7 +574,7 @@ column's scroll position by its children's keys."
      ((and (stringp file) (integerp pos))
       (jetpacs-opaque-id "gp-item-"
                          (list group file pos (alist-get 'type item)
-                               (alist-get 'date item))
+                               (alist-get 'day item) (alist-get 'date item))
                          16))
      ((stringp token)
       (jetpacs-opaque-id "gp-item-" (list group token) 16)))))
@@ -587,6 +590,24 @@ date.  An invalid DATE returns nil."
                         (string-trim-left (jetpacs-dates-format date "%e %b"))))
            (word (pcase delta (0 "Today") (1 "Tomorrow") (-1 "Yesterday"))))
       (if word (format "%s · %s" word day) day))))
+
+(defun glasspane-ui-dedupe-keys (nodes)
+  "Return NODES with any repeated sibling `:key' made unique in place.
+The second and later holders of a key get an ordinal suffix; nodes
+without a key pass through.  Order is preserved, so a repeat's suffix
+is stable across renders of the same list."
+  (let ((seen (make-hash-table :test #'equal)))
+    (mapcar
+     (lambda (node)
+       (let ((key (and (consp node) (plist-get node :key))))
+         (if (not (stringp key))
+             node
+           (let ((n (1+ (gethash key seen 0))))
+             (puthash key n seen)
+             (if (= n 1)
+                 node
+               (jetpacs-with-attrs node :key (format "%s-%d" key n)))))))
+     nodes)))
 
 (defun glasspane-ui-age-words (time &optional now)
   "TIME as a short relative phrase such as \"Edited 3 days ago\", or nil.

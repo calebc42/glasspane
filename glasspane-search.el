@@ -301,7 +301,8 @@ verbs and arguments are identical on both."
          ;; time — the replace sweep retires the last result list.
          (items (glasspane-ui-tokenize-tap glasspane-search--results
                                             "search-results"))
-         (cards (mapcar #'glasspane-detail-result-card items))
+         (cards (glasspane-ui-dedupe-keys
+                 (mapcar #'glasspane-detail-result-card items)))
          (input (jetpacs-text-input
                  "search-query"
                  :value q

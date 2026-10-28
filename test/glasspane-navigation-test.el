@@ -402,6 +402,35 @@ Without `on_back' the Companion finishes the Activity on a peer."
                         (append (plist-get done :spans) nil))))
     (should-not (glasspane-ui-card-meta '((headline . "x")) "2026-10-28"))))
 
+(ert-deftest glasspane-navigation-test-repeats-keep-distinct-sibling-keys ()
+  "A repeating task listed on several days never repeats a sibling key.
+The agenda day enters the key; and even identical items (an extractor
+quirk) leave a list through `glasspane-ui-dedupe-keys' with unique keys,
+because a duplicate sibling key refuses the whole surface update."
+  (let* ((base '((headline . "Weekly review") (file . "/v/a.org") (pos . 10)
+                 (type . "past-scheduled") (date . "2026-09-11")
+                 (token . "tok")))
+         (monday (cons '(day . "2026-10-26") base))
+         (friday (cons '(day . "2026-10-30") base)))
+    (should-not (equal (glasspane-ui-item-key monday)
+                       (glasspane-ui-item-key friday)))
+    (cl-letf (((symbol-function 'glasspane-ui-item-areas) (lambda (_) nil)))
+      (let* ((cards (glasspane-ui-dedupe-keys
+                     (mapcar #'glasspane-detail-agenda-card
+                             (list monday monday friday))))
+             (keys (mapcar (lambda (c) (plist-get c :key)) cards)))
+        (should (= 3 (length (delete-dups (copy-sequence keys)))))
+        (should (string-suffix-p "-2" (nth 1 keys)))
+        (should-not (plist-get (jetpacs-shell--analyze-spec
+                                (apply #'jetpacs-lazy-column cards))
+                               :duplicate-key)))
+      ;; The week view groups by the agenda day, not the stamp date.
+      (let ((json (jetpacs-node->canonical-json
+                   (glasspane-agenda--week-view (list monday friday)))))
+        (should (string-search "Mon 26 Oct" json))
+        (should (string-search "Fri 30 Oct" json))
+        (should-not (string-search "11 Sep" json))))))
+
 (ert-deftest glasspane-navigation-test-day-words ()
   "Agenda day headings read in words relative to today."
   (should (equal (glasspane-ui-day-words "2026-10-28" "2026-10-28")

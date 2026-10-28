@@ -210,15 +210,16 @@ under several, and the key must stay distinct in each."
         (apply
          #'jetpacs-lazy-column
          (append
-          (apply
-           #'append
-           (mapcar
-            (lambda (group)
-              (cons (jetpacs-section-header (car group))
-                    (mapcar (lambda (item)
-                              (glasspane-projects--card item (car group)))
-                            (cdr group))))
-            groups))
+          (glasspane-ui-dedupe-keys
+           (apply
+            #'append
+            (mapcar
+             (lambda (group)
+               (cons (jetpacs-section-header (car group))
+                     (mapcar (lambda (item)
+                               (glasspane-projects--card item (car group)))
+                             (cdr group))))
+             groups)))
           (list :spacing 8 :content-padding 12)))
       (jetpacs-empty-state
        :icon "task_alt"

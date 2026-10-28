@@ -252,9 +252,19 @@ every saved search just to size the rail."
 
 ;;;; Mode bodies (items arrive already tokenized)
 
+(defun glasspane-agenda--item-day (it)
+  "The agenda day IT is listed under, else its stamp date.
+A repeating or overdue entry carries its stamp's `date' on every day it
+recurs; the extractor's `day' is the day the agenda placed it on."
+  (or (alist-get 'day it) (alist-get 'date it)))
+
+(defun glasspane-agenda--cards (items)
+  "The shared cards for tokenized ITEMS with sibling-unique keys."
+  (glasspane-ui-dedupe-keys (mapcar #'glasspane-agenda--card items)))
+
 (defun glasspane-agenda--day-view (items)
   "The flat day list for tokenized ITEMS."
-  (let ((cards (mapcar #'glasspane-agenda--card items)))
+  (let ((cards (glasspane-agenda--cards items)))
     (if cards
         (apply #'jetpacs-lazy-column cards)
       (jetpacs-empty-state :icon "event_busy"
@@ -262,11 +272,11 @@ every saved search just to size the rail."
                            :caption "Nothing scheduled for this day."))))
 
 (defun glasspane-agenda--week-view (items)
-  "Tokenized ITEMS grouped under per-date section headers."
+  "Tokenized ITEMS grouped under per-day section headers."
   (let ((elements nil)
         (current-date nil))
     (dolist (it items)
-      (let ((date (alist-get 'date it)))
+      (let ((date (glasspane-agenda--item-day it)))
         (unless (equal date current-date)
           (setq current-date date)
           (push (jetpacs-section-header (or (glasspane-ui-day-words date)
@@ -274,7 +284,8 @@ every saved search just to size the rail."
                 elements))
         (push (glasspane-agenda--card it) elements)))
     (if elements
-        (apply #'jetpacs-lazy-column (nreverse elements))
+        (apply #'jetpacs-lazy-column
+               (glasspane-ui-dedupe-keys (nreverse elements)))
       (jetpacs-empty-state :icon "event_busy"
                            :title "No agenda items"
                            :caption "Nothing scheduled for this week."))))
@@ -296,8 +307,7 @@ grid, the documented fallback recipe."
                           sel)
                          ((string-prefix-p month-prefix today) today)
                          (t anchor)))
-         (items-by-date (seq-group-by (lambda (it) (alist-get 'date it))
-                                      items))
+         (items-by-date (seq-group-by #'glasspane-agenda--item-day items))
          (selected-items (cdr (assoc selected-date items-by-date))))
     (jetpacs-column
      (if (jetpacs-node-advertised-p "month_grid")
@@ -324,7 +334,7 @@ grid, the documented fallback recipe."
                                  selected-date))
      (if selected-items
          (apply #'jetpacs-lazy-column
-                (mapcar #'glasspane-agenda--card selected-items))
+                (glasspane-agenda--cards selected-items))
        (jetpacs-text "No events" :style "caption")))))
 
 (defun glasspane-agenda-month-fallback (items-by-date anchor selected-date
@@ -438,8 +448,7 @@ anchor to navigate."
     ("week" (glasspane-agenda--week-view items))
     ("month" (glasspane-agenda--month-view items anchor))
     (_ (if items
-           (apply #'jetpacs-lazy-column
-                  (mapcar #'glasspane-agenda--card items))
+           (apply #'jetpacs-lazy-column (glasspane-agenda--cards items))
          (jetpacs-empty-state :icon "event_busy"
                               :title "No results"
                               :caption

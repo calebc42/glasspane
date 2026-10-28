@@ -65,7 +65,7 @@ else \"inbox.org\" there."
   :type '(choice (const :tag "Default notes file" nil) file)
   :group 'glasspane-fab)
 
-(defcustom glasspane-fab-template-items 6
+(defcustom glasspane-fab-template-items 4
   "How many Org capture templates the list FAB offers as their own items."
   :type 'natnum :group 'glasspane-fab)
 
@@ -158,9 +158,35 @@ item, defaulting to \"New task\"."
   "The app-default FAB on Glasspane's other screens: capture and templates."
   (glasspane-fab-list))
 
+(defun glasspane-fab--heading-groups (token)
+  "The heading actions grouped for the sheets: alist of GROUP -> items.
+Each item is (LABEL ICON ACTION)."
+  (let* ((args (list :token token))
+         (act (lambda (verb &rest more)
+                (jetpacs-action verb :args (append args more)))))
+    `(("structure"
+       ("Add sub-heading" "subdirectory_arrow_right"
+        ,(funcall act "glasspane.fab.add" :relation "child"))
+       ("Add sibling task" "add_task"
+        ,(funcall act "glasspane.fab.add" :relation "after" :todo t))
+       ("Move up" "arrow_upward" ,(funcall act "glasspane.fab.move" :how "up"))
+       ("Move down" "arrow_downward" ,(funcall act "glasspane.fab.move" :how "down"))
+       ("Promote" "format_indent_decrease" ,(funcall act "glasspane.fab.move" :how "promote"))
+       ("Demote" "format_indent_increase" ,(funcall act "glasspane.fab.move" :how "demote")))
+      ("more"
+       ("Clone with time shift…" "event_repeat" ,(funcall act "glasspane.fab.clone"))
+       ("Run code blocks" "play_arrow"
+        ,(jetpacs-action "glasspane.fab.babel-subtree" :args args
+                         :confirm "Run every code block in this subtree?"))
+       ("Sort children…" "sort" ,(funcall act "glasspane.fab.sort"))
+       ("Update [/] cookies" "checklist" ,(funcall act "glasspane.fab.cookies"))
+       ("Toggle ARCHIVE tag" "inventory_2" ,(funcall act "glasspane.fab.archive-tag"))))))
+
 (defun glasspane-fab-heading (token &optional info)
   "The FAB for a heading page whose heading TOKEN names; INFO is its meta.
-A running clock makes the primary Clock out; otherwise Clock in."
+A running clock makes the primary Clock out; otherwise Clock in.  The menu
+keeps the frequent actions; Structure… and More… open grouped sheets, so
+the fan stays within Material's handful of items."
   (when (stringp token)
     (let* ((args (list :token token))
            (act (lambda (verb &rest more)
@@ -175,18 +201,6 @@ A running clock makes the primary Clock out; otherwise Clock in."
              (list
               (glasspane-fab-item "Add sub-task" "add_task"
                                   (funcall act "glasspane.fab.add" :relation "child" :todo t))
-              (glasspane-fab-item "Add sub-heading" "subdirectory_arrow_right"
-                                  (funcall act "glasspane.fab.add" :relation "child"))
-              (glasspane-fab-item "Add sibling" "playlist_add"
-                                  (funcall act "glasspane.fab.add" :relation "after"))
-              (glasspane-fab-item "Move up" "arrow_upward"
-                                  (funcall act "glasspane.fab.move" :how "up"))
-              (glasspane-fab-item "Move down" "arrow_downward"
-                                  (funcall act "glasspane.fab.move" :how "down"))
-              (glasspane-fab-item "Promote" "format_indent_decrease"
-                                  (funcall act "glasspane.fab.move" :how "promote"))
-              (glasspane-fab-item "Demote" "format_indent_increase"
-                                  (funcall act "glasspane.fab.move" :how "demote"))
               (if (glasspane-fab-countdown-active-p)
                   (glasspane-fab-item "Stop countdown" "timer_off"
                                       (jetpacs-action "glasspane.fab.countdown-stop"))
@@ -200,18 +214,39 @@ A running clock makes the primary Clock out; otherwise Clock in."
                 (glasspane-fab-item "Cancel clock" "cancel"
                                     (jetpacs-action "glasspane.fab.clock-cancel"
                                                     :confirm "Discard the running clock?")))
-              (glasspane-fab-item "Clone with time shift…" "event_repeat"
-                                  (funcall act "glasspane.fab.clone"))
-              (glasspane-fab-item "Run code blocks" "play_arrow"
-                                  (jetpacs-action "glasspane.fab.babel-subtree"
-                                                  :args args
-                                                  :confirm "Run every code block in this subtree?"))
-              (glasspane-fab-item "Sort children…" "sort"
-                                  (funcall act "glasspane.fab.sort"))
-              (glasspane-fab-item "Update [/] cookies" "checklist"
-                                  (funcall act "glasspane.fab.cookies"))
-              (glasspane-fab-item "Toggle ARCHIVE tag" "inventory_2"
-                                  (funcall act "glasspane.fab.archive-tag"))))))))
+              (glasspane-fab-item "Structure…" "account_tree"
+                                  (funcall act "glasspane.fab.group" :group "structure"))
+              (glasspane-fab-item "More…" "more_horiz"
+                                  (funcall act "glasspane.fab.group" :group "more"))))))))
+
+(defun glasspane-fab--on-group (args params)
+  "Show ARGS' `:group' of heading actions as a sheet."
+  (let ((group (assoc (plist-get args :group)
+                      (glasspane-fab--heading-groups (plist-get args :token)))))
+    (cond
+     ((null group) 'rejected)
+     ((null (glasspane-fab--ref args)) 'stale)
+     ((null (jetpacs-client)) 'rejected)
+     (t
+      (jetpacs-flow-continue
+       (lambda ()
+         (with-jetpacs-owner glasspane-fab--owner
+           (jetpacs-dialog-slot-show
+            (concat "gp-fab-group-" (car group))
+            (apply #'jetpacs-column
+                   (append
+                    (list (jetpacs-text (if (equal (car group) "structure")
+                                            "Structure" "More")
+                                        :style "title"))
+                    (mapcar (lambda (item)
+                              (jetpacs-with-attrs
+                               (jetpacs-button (nth 0 item) (nth 2 item)
+                                               :icon (nth 1 item) :variant "text")
+                               :fill_fraction 1))
+                            (cdr group))
+                    (list :spacing 2)))
+            :params params :style "sheet"))))
+      'accepted))))
 
 (defun glasspane-fab-outline (path)
   "The FAB for Org file PATH's outline in the Files document host."
@@ -282,9 +317,15 @@ ON-SUBMIT receives the captured fields plist after the dialog closes."
   (jetpacs-text-input id :label "Title" :hint hint :single-line t :autofocus t))
 
 (defun glasspane-fab--notify (text params)
-  "Show TEXT as a snackbar on PARAMS' surface and refresh it."
+  "Show TEXT as a snackbar on PARAMS' surface and refresh it.
+A tap from a sheet carries no surface: Glasspane's own refreshes."
   (jetpacs-shell-notify text (glasspane-fab--surface params))
-  (jetpacs-app-defer-refresh params))
+  (jetpacs-app-defer-refresh (list :surface (glasspane-fab--surface params))))
+
+(defun glasspane-fab--close-sheet ()
+  "Retire a grouped sheet whose button ran an immediate action."
+  (when (jetpacs-dialog-slot-live-p glasspane-fab--owner)
+    (jetpacs-dialog-slot-close glasspane-fab--owner)))
 
 ;;;; Heading verbs
 
@@ -338,6 +379,7 @@ ON-SUBMIT receives the captured fields plist after the dialog closes."
      ((not (member how '("up" "down" "promote" "demote"))) 'rejected)
      ((null ref) 'stale)
      (t
+      (glasspane-fab--close-sheet)
       (condition-case err
           (progn
             (pcase how
@@ -345,7 +387,7 @@ ON-SUBMIT receives the captured fields plist after the dialog closes."
               ("down" (jetpacs-org-structure-move glasspane-fab--owner ref 'glasspane 'down))
               ("promote" (jetpacs-org-structure-promote glasspane-fab--owner ref 'glasspane))
               ("demote" (jetpacs-org-structure-demote glasspane-fab--owner ref 'glasspane)))
-            (jetpacs-app-defer-refresh params)
+            (jetpacs-app-defer-refresh (list :surface (glasspane-fab--surface params)))
             'accepted)
         (ebp-org-unresolved 'stale)
         (error (glasspane-fab--notify (error-message-string err) params)
@@ -353,10 +395,12 @@ ON-SUBMIT receives the captured fields plist after the dialog closes."
 
 (defun glasspane-fab--at (args params fn &optional message)
   "Run FN at ARGS' heading, saving; notify MESSAGE and refresh on success."
+  (glasspane-fab--close-sheet)
   (let ((status (glasspane-ui-at-ref args fn t)))
     (when (and (eq status 'accepted) message)
       (jetpacs-shell-notify message (glasspane-fab--surface params)))
-    (when (eq status 'accepted) (jetpacs-app-defer-refresh params))
+    (when (eq status 'accepted)
+      (jetpacs-app-defer-refresh (list :surface (glasspane-fab--surface params))))
     status))
 
 (defun glasspane-fab--on-cookies (args params)
@@ -828,7 +872,8 @@ A list of (TITLE . MINUTES), nonzero only."
 ;;;; Lifecycle
 
 (defconst glasspane-fab--verbs
-  '("glasspane.fab.add" "glasspane.fab.move" "glasspane.fab.cookies"
+  '("glasspane.fab.add" "glasspane.fab.move" "glasspane.fab.group"
+    "glasspane.fab.cookies"
     "glasspane.fab.archive-tag" "glasspane.fab.sort" "glasspane.fab.effort"
     "glasspane.fab.clone" "glasspane.fab.babel-subtree"
     "glasspane.fab.clock-cancel" "glasspane.fab.countdown"
@@ -846,6 +891,9 @@ A list of (TITLE . MINUTES), nonzero only."
                          :doc "Add a child or sibling heading" :strict t
                          :args (append token '((:name relation :type "text" :required t)
                                                (:name todo :type "bool"))))
+      (jetpacs-defaction "glasspane.fab.group" #'glasspane-fab--on-group
+                         :doc "Show a group of heading actions as a sheet" :strict t
+                         :args (append token '((:name group :type "text" :required t))))
       (jetpacs-defaction "glasspane.fab.move" #'glasspane-fab--on-move
                          :doc "Move, promote or demote a subtree" :strict t
                          :args (append token '((:name how :type "text" :required t))))

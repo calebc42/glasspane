@@ -76,15 +76,43 @@
              (labels (glasspane-fab-test--labels fab)))
         (should (equal (plist-get fab :label) "Clock in"))
         (should (equal (plist-get (plist-get fab :on_tap) :args) '(:token "tok")))
-        (dolist (l '("Add sub-task" "Add sub-heading" "Add sibling" "Move up"
-                     "Move down" "Promote" "Demote" "Countdown 0:45" "Set effort…"
-                     "Clone with time shift…" "Run code blocks" "Sort children…"
-                     "Update [/] cookies" "Toggle ARCHIVE tag"))
-          (should (member l labels)))
-        (should-not (member "Cancel clock" labels))
-        (should (plist-get (glasspane-fab-test--action fab "Run code blocks") :confirm))
+        (should (equal labels '("Add sub-task" "Countdown 0:45" "Set effort…"
+                                "Structure…" "More…")))
+        (should (<= (length labels) 7))
+        (should (equal (plist-get (glasspane-fab-test--action fab "More…") :args)
+                       '(:token "tok" :group "more")))
+        (let ((groups (glasspane-fab--heading-groups "tok")))
+          (should (equal (mapcar #'car (cdr (assoc "structure" groups)))
+                         '("Add sub-heading" "Add sibling task" "Move up" "Move down"
+                           "Promote" "Demote")))
+          (should (equal (mapcar #'car (cdr (assoc "more" groups)))
+                         '("Clone with time shift…" "Run code blocks" "Sort children…"
+                           "Update [/] cookies" "Toggle ARCHIVE tag")))
+          (should (plist-get (nth 2 (assoc "Run code blocks" (cdr (assoc "more" groups))))
+                             :confirm)))
         (should (jetpacs-check-profile fab 'app))
         (should-not (glasspane-fab-heading nil))))))
+
+(ert-deftest glasspane-fab-test-group-sheet ()
+  "Structure… and More… open a sheet of their actions; junk groups reject."
+  (glasspane-fab-test--with-file "* Top\n"
+    (let (shown)
+      (cl-letf (((symbol-function 'jetpacs-client) (lambda () 'fake))
+                ((symbol-function 'jetpacs-flow-continue) (lambda (fn) (funcall fn)))
+                ((symbol-function 'jetpacs-dialog-slot-show)
+                 (lambda (id spec &rest keys)
+                   (jetpacs-check-profile spec 'dialog)
+                   (setq shown (list id spec (plist-get keys :style))))))
+        (should (eq (glasspane-fab--on-group (list :token token :group "more") nil)
+                    'accepted))
+        (should (equal (car shown) "gp-fab-group-more"))
+        (should (equal (nth 2 shown) "sheet"))
+        (should (string-search "Toggle ARCHIVE tag"
+                               (jetpacs-node->canonical-json (nth 1 shown))))
+        (should (eq (glasspane-fab--on-group (list :token token :group "nope") nil)
+                    'rejected))
+        (should (eq (glasspane-fab--on-group '(:token "expired" :group "more") nil)
+                    'stale))))))
 
 (ert-deftest glasspane-fab-test-degrades-without-the-node ()
   "No material3.fab: the FAB menu; no menu either: the capture button."

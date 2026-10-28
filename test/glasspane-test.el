@@ -5534,7 +5534,7 @@ point: a new screen cannot ship unreachable.")
     "files.toggle-refile"
     "glasspane.document.open" "glasspane.files.return"
     "glasspane.packages.install" "glasspane.refresh" "glasspane.ts.part" "glasspane.pane.close"
-    "glasspane.fab.add" "glasspane.fab.move" "glasspane.fab.cookies"
+    "glasspane.fab.add" "glasspane.fab.move" "glasspane.fab.group" "glasspane.fab.cookies"
     "glasspane.fab.archive-tag" "glasspane.fab.sort" "glasspane.fab.effort"
     "glasspane.fab.clone" "glasspane.fab.babel-subtree"
     "glasspane.fab.clock-cancel" "glasspane.fab.countdown"

@@ -458,6 +458,11 @@ evicted it from the bounded stack."
                          (glasspane-detail-with-pane
                           (jetpacs-wire-id "area" category)
                           (lambda () (glasspane-areas--drill-body category)))
+                         :fab (glasspane-detail-screen-fab
+                               (jetpacs-wire-id "area" category)
+                               (glasspane-fab-list
+                                :area category
+                                :label (format "New task in %s" category)))
                          :back (glasspane-ui-parent-back
                                 back glasspane-areas--screen-id
                                 (glasspane-ui-reopen-action "areas.open"))

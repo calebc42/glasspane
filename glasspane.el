@@ -66,6 +66,8 @@
 ;; The planning timestamp dialog, lifted from Orgzly Native and dressed in
 ;; Material; detail's date pills and planning drawers open it.
 (require 'glasspane-timestamp)
+;; The state-aware extended FAB and its per-screen Org actions.
+(require 'glasspane-fab)
 (require 'glasspane-detail)
 ;; G5 plus the PARA screens: the foundation date helper supports both daily
 ;; halves; agenda and Projects build on detail's shared card and the
@@ -148,7 +150,7 @@ explicitly; see RENDERER.org."
                   :chrome 'primary
                   :dock-core nil
                   :drawer-core '("eval")
-                  :fab #'glasspane-ui-capture-fab
+                  :fab #'glasspane-fab-app
                   ;; Glasspane alone decides that its root represents
                   ;; Agenda.  Jetpacs only consumes this generic route
                   ;; metadata when a deep link falls back to the root.
@@ -171,6 +173,7 @@ explicitly; see RENDERER.org."
   (glasspane-org-reader-register)
   (glasspane-navigation-register)
   (glasspane-timestamp-register)
+  (glasspane-fab-register)
   (glasspane-detail-register)
   (glasspane-agenda-register)
   (glasspane-projects-register)
@@ -196,6 +199,7 @@ deliberately survive."
   (glasspane-ui-unregister)
   (glasspane-org-reader-unregister)
   (glasspane-timestamp-unregister)
+  (glasspane-fab-unregister)
   (glasspane-views-unregister)
   (glasspane-notes-unregister)
   (glasspane-srs-unregister))

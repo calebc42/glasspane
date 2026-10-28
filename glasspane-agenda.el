@@ -605,6 +605,19 @@ Agenda destination calls it."
   (let ((n (glasspane-agenda--today-count)))
     (and (> n 0) (number-to-string n))))
 
+(defun glasspane-agenda--shown-day ()
+  "The day the Agenda shows: the anchor on Day, the picked day on Month."
+  (let ((mode (glasspane-agenda--current-mode))
+        (anchor (glasspane-agenda--anchor)))
+    (pcase mode
+      ("day" anchor)
+      ("month" (let ((sel glasspane-ui-agenda-selected-date))
+                 (if (and (stringp sel)
+                          (string-prefix-p (substring anchor 0 7) sel))
+                     sel
+                   anchor)))
+      (_ nil))))
+
 (defun glasspane-agenda-screen (back)
   "The pushed Agenda screen.
 Today's count rides the dock badge (`glasspane-agenda-dock-badge'), so
@@ -612,6 +625,10 @@ the screen repeats no number above its pages."
   (jetpacs-chrome-screen
    "Agenda"
    (glasspane-detail-with-pane "glasspane-agenda" #'glasspane-agenda-body)
+   :fab (glasspane-detail-screen-fab
+         "glasspane-agenda"
+         (glasspane-fab-list :date (glasspane-agenda--shown-day)
+                             :area glasspane-agenda--area-filter))
    :back back
    :on-back (glasspane-detail-pane-on-back "glasspane-agenda" nil)
    :on-refresh (glasspane-ui-refresh-action)

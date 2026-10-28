@@ -201,6 +201,29 @@ The trailing **Saved** tab is where saved searches are managed: each custom
 agenda row jumps to its page and carries edit and delete buttons, **New saved
 search** opens the editor, and saved Views open as peers beneath.
 
+The floating action button is Material's extended FAB, folding to its icon
+while you scroll, with a small toggle above it that fans out the screen's
+Org actions. Its labelled action follows state: **Capture** normally,
+**Clock in** on a heading page, and **Clock out · task** on every screen
+while a clock runs.
+
+- Agenda, Projects and an Area page: **New task** (filed in the inbox,
+  scheduled for the day the Agenda shows, tagged with the Projects Area
+  filter or the Area), a task under the clocked heading, and each Org
+  capture template as its own item.
+- A heading page or pane: add a sub-task, sub-heading or sibling; move up
+  or down, promote, demote; a countdown from the heading's Effort (a
+  phone reminder at its end); set Effort; cancel the clock; clone with a
+  time shift; run the subtree's code blocks (confirmed); sort the
+  children; update their [/] cookies; toggle the ARCHIVE tag.
+- A file's outline: a new TODO or heading, run all code blocks and tangle
+  (both confirmed), update clock tables and other dynamic blocks, and the
+  clocked totals per heading.
+
+The inbox is `glasspane-fab-inbox`, else `org-default-notes-file` when it
+lies in `org-directory`, else `inbox.org` there. A Companion without the
+extended FAB gets the same items as a FAB menu.
+
 Scheduling lives in one dialog, lifted from Orgzly Native and dressed in
 Material: the day as a date button over Today / Tomorrow / Next week chips,
 time and end time behind switches, and Repeat and Delay (a Warning period on

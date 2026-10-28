@@ -83,7 +83,7 @@
       (cl-letf (((symbol-function 'glasspane-ui--detail-meta)
                  (lambda (_) '(:file "/v/a.org" :pos 7 :file-title "Life")))
                 ((symbol-function 'glasspane-detail-pane)
-                 (lambda (_) (jetpacs-text "page"))))
+                 (lambda (&rest _) (jetpacs-text "page"))))
         (let* ((screen (glasspane-agenda-screen nil))
                (json (jetpacs-node->canonical-json (plist-get screen :body))))
           (should (string-search "page" json))

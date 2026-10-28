@@ -84,6 +84,7 @@
 (require 'glasspane-org)
 (require 'glasspane-ui)
 (require 'glasspane-timestamp)          ; the planning dialog detail opens
+(require 'glasspane-fab)                ; the heading page's FAB
 (require 'glasspane-navigation)
 (require 'jetpacs-org-settings)      ; the shared tag vocabulary
 
@@ -467,6 +468,7 @@ Signals like `ebp-org-resolve-ref'; the screen builder classifies."
                                    (and file (file-name-base file)))
                    :backlinks (glasspane-detail--backlink-count pos)
                    :clocked-in (and (ebp-org-clocked-in-p pos) t)
+                   :effort (org-entry-get pos "Effort")
                    :props (ignore-errors
                             (org-entry-properties pos 'standard))
                    :logbook (ignore-errors (ebp-org-logbook-entries pos))
@@ -1376,8 +1378,13 @@ Everything rarer lives in the top bar's overflow menu."
             (glasspane-ui--detail-toolbar-extras ref)
             (list :scroll t)))))
 
-(defun glasspane-detail-pane (ref)
-  "The heading page for REF as a pane beside a list.
+(defvar glasspane-detail--pane-fab nil
+  "The heading FAB the last pane build minted, as (SCREEN-ID . NODE).
+The screen's `:fab' is evaluated after its body, so the pane's own token
+names the heading without a second mint sweeping the first.")
+
+(defun glasspane-detail-pane (ref &optional id)
+  "The heading page for REF as a pane beside screen ID's list.
 The pushed screen's top bar, floating toolbar and bottom bar become a
 header row and a closing action row; the body is the same page.  A ref
 that stopped resolving degrades to a placeholder."
@@ -1386,6 +1393,8 @@ that stopped resolving degrades to a placeholder."
         (let* ((info (glasspane-ui--detail-meta ref))
                (tokens (glasspane-detail--tokens info))
                (read glasspane-ui--detail-read-mode))
+          (setq glasspane-detail--pane-fab
+                (cons id (glasspane-fab-heading (plist-get tokens :main) info)))
           (apply
            #'jetpacs-column
            (delq nil
@@ -1435,7 +1444,7 @@ while the list builds so its card can show the selection."
     (let* ((ref (glasspane-ui-pane-selection id))
            (meta (and ref (condition-case nil (glasspane-ui--detail-meta ref)
                             (error nil))))
-           (detail (cond (meta (glasspane-detail-pane ref))
+           (detail (cond (meta (glasspane-detail-pane ref id))
                          (t (when ref (glasspane-ui-pane-select id nil))
                             (glasspane-detail-pane-placeholder))))
            (glasspane-ui-pane-current
@@ -1445,6 +1454,16 @@ while the list builds so its card can show the selection."
       (jetpacs-pane-scaffold (let ((glasspane-ui-narrow-container t))
                                (funcall body-fn))
                              detail))))
+
+(defun glasspane-detail-screen-fab (id fallback)
+  "Screen ID's FAB: its pane's heading FAB while one is open, else FALLBACK.
+Call after the screen's body is built (`glasspane-detail-with-pane')."
+  (if (and (glasspane-ui-pane-capable-p)
+           (glasspane-ui-pane-selection id)
+           (equal (car glasspane-detail--pane-fab) id)
+           (cdr glasspane-detail--pane-fab))
+      (cdr glasspane-detail--pane-fab)
+    fallback))
 
 (defun glasspane-detail-pane-on-back (id fallback)
   "Screen ID's back gesture: close its open pane first, else FALLBACK."
@@ -1467,6 +1486,7 @@ never guess)."
          (glasspane-ui-measure
           (glasspane-ui--detail-body-with-notes info tokens))
          :back (glasspane-ui-route-back back)
+         :fab (glasspane-fab-heading (plist-get tokens :main) info)
          :actions (glasspane-detail--top-actions info tokens)
          :bottom-bar (when glasspane-ui--detail-read-mode
                        (glasspane-detail--bottom-bar tokens))

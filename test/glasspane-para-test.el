@@ -1775,7 +1775,7 @@ Tasks alias is gone."
     (should-not (plist-get plist :dock-core))
     (should (equal (plist-get plist :drawer-core) '("eval")))
     (should-not (plist-get plist :dock))
-    (should (eq (plist-get plist :fab) #'glasspane-ui-capture-fab))
+    (should (eq (plist-get plist :fab) #'glasspane-fab-app))
     (let ((jetpacs-apps--registry (list entry))
           (jetpacs-apps--current glasspane-owner)
           (jetpacs-apps--current-route "areas")
@@ -1831,10 +1831,11 @@ Tasks alias is gone."
                     "Authored" (jetpacs-text "authored")
                     :fab authored-fab))
          (default (jetpacs-apps-default-fab glasspane-owner surface)))
-    (should-not (plist-member (glasspane-agenda-screen nil) :fab))
+    ;; Agenda authors its own state-aware FAB (glasspane-fab-list).
+    (should (plist-get (glasspane-agenda-screen nil) :fab))
     (should default)
-    (should (equal (glasspane-para-test--action-names default)
-                   '("org.capture.show")))
+    (should (member "org.capture.show"
+                    (glasspane-para-test--action-names default)))
     ;; Native Glasspane screen, free slot: registry default lands.
     (should
      (equal (plist-get (jetpacs-chrome--join-app-fab

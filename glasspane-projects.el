@@ -265,6 +265,14 @@ the grouping control trailing the workflow rail."
   (jetpacs-chrome-screen "Projects"
                          (glasspane-detail-with-pane
                           "glasspane-projects" #'glasspane-projects--body)
+                         :fab (glasspane-detail-screen-fab
+                               "glasspane-projects"
+                               (glasspane-fab-list
+                                :area glasspane-projects--area-filter
+                                :label (if glasspane-projects--area-filter
+                                           (format "New project in %s"
+                                                   glasspane-projects--area-filter)
+                                         "New project")))
                          :back back
                          :on-back (glasspane-detail-pane-on-back
                                    "glasspane-projects"

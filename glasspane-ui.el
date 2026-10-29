@@ -205,11 +205,13 @@ Nil when there is nothing to say."
                                        :color "outline")))))))
     (glasspane-ui-meta-line groups)))
 
-(defun glasspane-ui-chip-line (areas tags &optional arrange)
+(defun glasspane-ui-chip-line (areas tags &optional arrange scroll)
   "One wrapping chip row: AREAS elevated with their icons, then TAGS flat.
 Every chip searches by its tag.  ARRANGE defaults to \"start\".  Nil when
 both are empty.  The elevated/flat contrast is what tells an Area from an
-ordinary Org tag."
+ordinary Org tag.  SCROLL non-nil keeps the chips on one line that
+scrolls sideways instead of wrapping, for a narrow cell where wrapping
+gave each chip a line of its own."
   (let ((chips
          (append
           (mapcar (lambda (tag)
@@ -224,9 +226,12 @@ ordinary Org tag."
                                                  :args (list :tag tag))))
                   tags))))
     (when chips
-      (apply #'jetpacs-flow-row
-             (append chips (list :spacing 4 :run-spacing 4
-                                 :arrange (or arrange "start")))))))
+      (if scroll
+          (apply #'jetpacs-row
+                 (append chips (list :scroll t :spacing 4 :align "center")))
+        (apply #'jetpacs-flow-row
+               (append chips (list :spacing 4 :run-spacing 4
+                                   :arrange (or arrange "start"))))))))
 
 (defun glasspane-ui-meta-line (groups &optional style)
   "One caption line of GROUPS, each a list of spans, joined by dots.

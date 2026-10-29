@@ -887,7 +887,7 @@ are the app layers' Connections nodes."
                   "Tags"
                   (jetpacs-row
                    (jetpacs-with-attrs
-                    (or (glasspane-ui-chip-line areas tags)
+                    (or (glasspane-ui-chip-line areas tags nil t)
                         (jetpacs-text "No tags" :style "body" :color "outline"))
                     :weight 1)
                    (jetpacs-icon-button

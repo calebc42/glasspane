@@ -2022,7 +2022,16 @@ rejects, and a swept or mismatched list answers `stale'."
     (let* ((tags-row (nth 3 rows))
            (edit (cl-find "icon_button" (glasspane-test--nodes tags-row)
                           :key (lambda (n) (plist-get n :t)) :test #'equal)))
-      (should (equal (plist-get (plist-get edit :on_tap) :args) '(:section "tags"))))
+      (should (equal (plist-get (plist-get edit :on_tap) :args) '(:section "tags")))
+      ;; The chips share one sideways-scrolling line: wrapping in the
+      ;; narrow value cell gave each chip a line of its own on a phone.
+      (let ((line (cl-find-if (lambda (n) (and (equal (plist-get n :t) "row")
+                                               (plist-get n :scroll)))
+                              (glasspane-test--nodes tags-row))))
+        (should line)
+        (should (string-search "deep" (jetpacs-node->canonical-json line)))
+        (should-not (cl-find "flow_row" (glasspane-test--nodes tags-row)
+                             :key (lambda (n) (plist-get n :t)) :test #'equal))))
     (should (equal (plist-get (plist-get (car rows) :on_tap) :args)
                    '(:token "tok" :type "SCHEDULED")))
     ;; A set date hides its add chip, so its row carries a visible edit
@@ -2403,7 +2412,8 @@ rejects, and a swept or mismatched list answers `stale'."
                (body (glasspane-ui--detail-body info '(:main "token")))
                (line (seq-find
                       (lambda (n)
-                        (and (equal (plist-get n :t) "flow_row")
+                        (and (equal (plist-get n :t) "row")
+                             (plist-get n :scroll)
                              (seq-some (lambda (c)
                                          (equal (plist-get c :t)
                                                 "material3.assist_chip"))

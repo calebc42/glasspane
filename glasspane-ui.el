@@ -279,11 +279,6 @@ lands in the phone layout and chrome re-pushes on the real class."
   "Non-nil when the window's width class is medium or expanded."
   (not (glasspane-ui-compact-width-p)))
 
-(defconst glasspane-ui-edge-gap 16
-  "Dp between a wide window's list and the navigation rail beside it.
-The rail is lifted off the page, so cards flush against it read as one
-block; the pane scaffold already keeps a gap on the list's other side.")
-
 (defconst glasspane-ui-card-gap 8
   "Dp below each list card.
 The design baseline tints filled cards off the page instead of

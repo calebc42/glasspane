@@ -1501,10 +1501,9 @@ while the list builds so its card can show the selection."
             (and meta (or (plist-get meta :ref)
                           (list :file (plist-get meta :file)
                                 :pos (plist-get meta :pos))))))
-      (jetpacs-pane-scaffold (jetpacs-with-attrs
-                              (let ((glasspane-ui-narrow-container t))
-                                (funcall body-fn))
-                              :pad (list :start glasspane-ui-edge-gap))
+      ;; The renderer keeps the list clear of a lifted rail.
+      (jetpacs-pane-scaffold (let ((glasspane-ui-narrow-container t))
+                               (funcall body-fn))
                              detail))))
 
 (defun glasspane-detail-screen-fab (id fallback)

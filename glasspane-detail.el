@@ -852,13 +852,24 @@ are the app layers' Connections nodes."
           (lambda (label stamp kind type)
             (when-let* ((h (glasspane-ui-human-date stamp today :done done
                                                     :kind kind :warn-days warn)))
+              ;; A visible edit button, like the Tags row's: a set date
+              ;; hides its add chip, and a tappable row alone did not
+              ;; read as the way to change it.
               (glasspane-detail--band-row
                label
-               (jetpacs-column
-                (jetpacs-text (plist-get h :label) :style "body" :font-weight 500
-                              :color (plist-get h :color))
-                (jetpacs-text (plist-get h :long) :style "caption" :color "outline")
-                :spacing 0)
+               (jetpacs-row
+                (jetpacs-with-attrs
+                 (jetpacs-column
+                  (jetpacs-text (plist-get h :label) :style "body" :font-weight 500
+                                :color (plist-get h :color))
+                  (jetpacs-text (plist-get h :long) :style "caption" :color "outline")
+                  :spacing 0)
+                 :weight 1)
+                (jetpacs-icon-button
+                 "edit_calendar" (funcall plan-edit type)
+                 :content-description (if (eq kind 'scheduled)
+                                          "Reschedule" "Change deadline"))
+                :align "center" :spacing 4 :fill t)
                (funcall plan-edit type)))))
          (rows
           (delq nil

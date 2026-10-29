@@ -2025,6 +2025,18 @@ rejects, and a swept or mismatched list answers `stale'."
       (should (equal (plist-get (plist-get edit :on_tap) :args) '(:section "tags"))))
     (should (equal (plist-get (plist-get (car rows) :on_tap) :args)
                    '(:token "tok" :type "SCHEDULED")))
+    ;; A set date hides its add chip, so its row carries a visible edit
+    ;; button opening the same dialog.
+    (cl-loop for row in (list (nth 0 rows) (nth 1 rows))
+             for type in '("SCHEDULED" "DEADLINE")
+             for name in '("Reschedule" "Change deadline")
+             do (let ((edit (cl-find "icon_button" (glasspane-test--nodes row)
+                                     :key (lambda (n) (plist-get n :t))
+                                     :test #'equal)))
+                  (should (equal (plist-get edit :icon) "edit_calendar"))
+                  (should (equal (plist-get (plist-get edit :on_tap) :args)
+                                 (list :token "tok" :type type)))
+                  (should (string-search name (jetpacs-node->canonical-json edit)))))
     ;; Everything set: no add chips; nothing open: no tonal toggle.
     (should-not (string-search "\"label\":\"Schedule\"" json))
     (should-not (string-search "\"variant\":\"tonal\"" json))

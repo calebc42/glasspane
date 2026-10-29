@@ -213,7 +213,8 @@ carrying a ref on the wire (D-4)."
                          (glasspane-ui-chip-line
                           nil (cl-remove-if (lambda (tag) (member tag areas))
                                             (append (alist-get 'tags item) nil)))))))))
-    (jetpacs-card
+    (jetpacs-with-attrs
+     (jetpacs-card
      (list (apply #'jetpacs-row
                   (delq nil
                         (list (jetpacs-with-attrs (jetpacs-box middle)
@@ -241,7 +242,8 @@ carrying a ref on the wire (D-4)."
                (jetpacs-action "heading.schedule"
                                :args (list :token token :when "+0d")
                                :when-offline "queue"
-                               :ttl-s glasspane-views--ttl-s))))))))
+                               :ttl-s glasspane-views--ttl-s))))))
+     :pad (list :bottom glasspane-ui-card-gap))))
 
 ;;;; The drag-reorder list
 

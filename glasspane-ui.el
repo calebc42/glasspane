@@ -274,6 +274,16 @@ lands in the phone layout and chrome re-pushes on the real class."
   "Non-nil when the window's width class is medium or expanded."
   (not (glasspane-ui-compact-width-p)))
 
+(defconst glasspane-ui-edge-gap 16
+  "Dp between a wide window's list and the navigation rail beside it.
+The rail is lifted off the page, so cards flush against it read as one
+block; the pane scaffold already keeps a gap on the list's other side.")
+
+(defconst glasspane-ui-card-gap 8
+  "Dp below each list card.
+The design baseline tints filled cards off the page instead of
+outlining them, so a stack of cards needs space to read as separate.")
+
 (defcustom glasspane-ui-measure-dp 760
   "The widest a reading column grows, in dp, on medium and expanded windows.
 Lists and pages center at this width instead of stretching across a
@@ -288,7 +298,8 @@ A compact window gets NODE unchanged: a phone is already narrower."
     (jetpacs-with-attrs
      (jetpacs-box (jetpacs-with-attrs node
                                       :max_width glasspane-ui-measure-dp
-                                      :fill_fraction 1)
+                                      :fill_fraction 1
+                                      :pad (list :horizontal glasspane-ui-edge-gap))
                   :alignment "top_center")
      :fill_fraction 1)))
 

@@ -366,7 +366,10 @@ without duplicating Areas."
      ;; Filled reads lighter than an outline on the surface; the heading
      ;; shown in the pane beside the list lifts to elevated.
      :variant (if selected "elevated" "filled"))
-     :key (glasspane-ui-item-key it group))))
+     :key (glasspane-ui-item-key it group)
+     ;; A tinted card has no border to part it from the next, so stacked
+     ;; cards keep a gap of their own whatever list holds them.
+     :pad (list :bottom glasspane-ui-card-gap))))
 
 (defun glasspane-detail-result-card (it)
   "Render a search/heading item IT to a tappable card with tag chips.
@@ -395,7 +398,8 @@ agenda card places them; ordinary tags keep the full bottom row."
                                        "heading.tap"
                                        :args (list :token token)))
                    :variant "filled")
-     :key (glasspane-ui-item-key it))))
+     :key (glasspane-ui-item-key it)
+     :pad (list :bottom glasspane-ui-card-gap))))
 
 ;;;; Detail extraction
 
@@ -1441,6 +1445,9 @@ that stopped resolving degrades to a placeholder."
                                  "close" (glasspane-ui-pane-close-action)
                                  :content-description "Close")
                                 :align "center" :spacing 4 :fill t)))
+                  ;; The header row is the pane's own top bar: a hairline
+                  ;; parts it from the page beneath.
+                  (jetpacs-divider)
                   (jetpacs-with-attrs
                    (glasspane-ui--detail-body-with-notes info tokens)
                    :weight 1)
@@ -1483,8 +1490,10 @@ while the list builds so its card can show the selection."
             (and meta (or (plist-get meta :ref)
                           (list :file (plist-get meta :file)
                                 :pos (plist-get meta :pos))))))
-      (jetpacs-pane-scaffold (let ((glasspane-ui-narrow-container t))
-                               (funcall body-fn))
+      (jetpacs-pane-scaffold (jetpacs-with-attrs
+                              (let ((glasspane-ui-narrow-container t))
+                                (funcall body-fn))
+                              :pad (list :start glasspane-ui-edge-gap))
                              detail))))
 
 (defun glasspane-detail-screen-fab (id fallback)

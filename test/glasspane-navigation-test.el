@@ -457,7 +457,7 @@ because a duplicate sibling key refuses the whole surface update."
         (should (equal (plist-get m :t) "box"))
         (should (equal (plist-get m :alignment) "top_center"))
         (should (= (plist-get (seq-first (plist-get m :children)) :max_width)
-                   glasspane-ui-measure-dp))
+                   jetpacs-measure-dp))
         (should (equal (plist-get (plist-get (glasspane-resources-screen nil) :body)
                                   :t)
                        "box"))))

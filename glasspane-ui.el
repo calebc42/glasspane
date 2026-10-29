@@ -284,24 +284,16 @@ block; the pane scaffold already keeps a gap on the list's other side.")
 The design baseline tints filled cards off the page instead of
 outlining them, so a stack of cards needs space to read as separate.")
 
-(defcustom glasspane-ui-measure-dp 760
-  "The widest a reading column grows, in dp, on medium and expanded windows.
-Lists and pages center at this width instead of stretching across a
-tablet, the measure every readable editor keeps."
-  :type 'natnum :group 'jetpacs)
+(define-obsolete-variable-alias 'glasspane-ui-measure-dp
+  'jetpacs-measure-dp "polish-navigation")
 
 (defun glasspane-ui-measure (node)
-  "NODE centered at `glasspane-ui-measure-dp' on a wide window.
-A compact window gets NODE unchanged: a phone is already narrower."
-  (if (glasspane-ui-compact-width-p)
+  "NODE centered at `jetpacs-measure-dp' on a wide window (`jetpacs-measure').
+A compact window, or a narrow container (`glasspane-ui-narrow-container'),
+gets NODE unchanged: it is already narrower."
+  (if glasspane-ui-narrow-container
       node
-    (jetpacs-with-attrs
-     (jetpacs-box (jetpacs-with-attrs node
-                                      :max_width glasspane-ui-measure-dp
-                                      :fill_fraction 1
-                                      :pad (list :horizontal glasspane-ui-edge-gap))
-                  :alignment "top_center")
-     :fill_fraction 1)))
+    (jetpacs-measure node)))
 
 ;;;; Two-pane selection (lists beside the heading page on wide windows)
 
